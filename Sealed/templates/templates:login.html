@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Connexion - Portefeuille Numérique</title>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen">
+    <div class="bg-gray-800 p-10 rounded-2xl shadow-2xl w-96 border border-gray-700">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-400">Bon retour !</h1>
+            <p class="text-gray-400 text-sm mt-2">Accédez à vos fonds en toute sécurité</p>
+        </div>
+
+        <form method="POST">
+            <div class="mb-4">
+                <label class="block text-gray-400 text-xs mb-1 ml-1 uppercase font-bold">Utilisateur</label>
+                <input type="text" name="username" placeholder="Pseudo" 
+                       class="w-full p-3 rounded bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" required>
+            </div>
+            
+            <div class="mb-6">
+                <label class="block text-gray-400 text-xs mb-1 ml-1 uppercase font-bold">Mot de passe</label>
+                <input type="password" name="password" placeholder="••••••••" 
+                       class="w-full p-3 rounded bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" required>
+            </div>
+
+            <button type="submit" 
+                    class="w-full bg-blue-600 py-3 rounded-lg font-bold hover:bg-blue-700 transform hover:scale-[1.02] transition-all active:scale-95 shadow-lg">
+                Se connecter
+            </button>
+        </form>
+
+        <div class="mt-8 pt-6 border-t border-gray-700 text-center">
+            <p class="text-gray-400 text-sm">
+                Pas encore de compte ? 
+                <a href="/register" class="text-blue-400 hover:underline">S'inscrire</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
