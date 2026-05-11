@@ -2,123 +2,189 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>The Dollar Map - Conquer the World</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Dollar Map | World Conquest</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        #map { height: 70vh; background: #0b0e14; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
-        .leaflet-container { background: #0b0e14 !important; }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #020617; }
+        #map { 
+            position: absolute; top: 0; bottom: 0; left: 0; right: 0; z-index: 1;
+            background: #020617 !important;
+        }
+        /* Style pour masquer les labels Leaflet inutiles */
+        .leaflet-control-attribution { display: none !important; }
+        
+        /* Effet de flou pour les panneaux */
+        .glass {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
-<body class="bg-slate-900 text-white font-sans">
+<body class="text-white">
 
-<div class="container mx-auto p-6">
-    <header class="flex justify-between items-center mb-8">
-        <h1 class="text-3xl font-bold tracking-tighter text-blue-500">THE DOLLAR MAP<span class="text-white">.com</span></h1>
-        <div class="bg-slate-800 px-4 py-2 rounded-full border border-slate-700">
-            Solde: <span id="user-balance" class="font-bold text-green-400">0.00 €</span>
+    <div id="map"></div>
+
+    <div class="absolute top-6 left-6 z-[1000] flex items-center gap-4">
+        <div class="glass p-4 rounded-2xl shadow-2xl">
+            <h1 class="text-xl font-black tracking-tighter text-blue-500">THE DOLLAR MAP<span class="text-white">.com</span></h1>
         </div>
-    </header>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div class="lg:col-span-2">
-            <div id="map"></div>
-        </div>
-
-        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700">
-            <h2 id="country-name" class="text-2xl font-bold mb-2">Sélectionnez un pays</h2>
-            <div id="country-info" class="hidden">
-                <p class="text-slate-400 mb-4">Code: <span id="country-code" class="text-white"></span></p>
-                <div class="bg-slate-900 p-4 rounded-xl mb-6">
-                    <p class="text-sm text-slate-500 uppercase">Prix actuel</p>
-                    <p id="country-price" class="text-3xl font-mono font-bold text-blue-400">1.00 €</p>
-                </div>
-                
-                <label class="block text-sm text-slate-400 mb-2">URL de votre image (Logo/Photo)</label>
-                <input type="text" id="image-url" placeholder="https://..." class="w-full bg-slate-700 border-none rounded-lg p-3 mb-4 focus:ring-2 focus:ring-blue-500">
-                
-                <button onclick="processPurchase()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all">
-                    CONQUÉRIR CE PAYS
-                </button>
-            </div>
+        <div class="glass px-6 py-4 rounded-2xl flex flex-col">
+            <span class="text-[10px] uppercase tracking-widest text-slate-400">Votre Solde</span>
+            <span id="user-balance" class="text-xl font-bold text-green-400">10.00 €</span>
         </div>
     </div>
-</div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-    const map = L.map('map').setView([20, 0], 2);
-    let selectedISO = null;
-    let countryLayers = {};
+    <div class="absolute top-32 left-6 z-[1000] w-64 glass rounded-2xl p-5 shadow-2xl">
+        <h2 class="text-sm font-bold uppercase tracking-widest text-blue-400 mb-4 border-b border-white/10 pb-2">Top Valeurs</h2>
+        <div id="scoreboard" class="space-y-3">
+            <p class="text-xs text-slate-500 italic text-center">Chargement du monde...</p>
+        </div>
+    </div>
 
-    // Fond de carte sombre
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    <div id="buy-panel" class="absolute top-6 right-6 z-[1000] w-80 glass rounded-2xl p-6 shadow-2xl hidden translate-x-full transition-transform duration-300">
+        <div class="flex justify-between items-start mb-6">
+            <div>
+                <h2 id="country-name" class="text-2xl font-black uppercase italic">FRANCE</h2>
+                <span id="country-code" class="text-xs font-mono text-slate-500">FRA</span>
+            </div>
+            <button onclick="closePanel()" class="text-slate-500 hover:text-white">✕</button>
+        </div>
 
-    // Fonction pour créer un motif d'image dans le SVG de la carte
-    function updatePattern(id, url) {
-        let defs = document.querySelector('svg defs') || document.createElementNS("http://www.w3.org/2000/svg", "defs");
-        if (!defs.parentNode) document.querySelector('svg').appendChild(defs);
-        
-        let pattern = document.getElementById('pat-'+id);
-        if(!pattern) {
-            pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
-            pattern.setAttribute('id', 'pat-'+id);
-            pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-            pattern.setAttribute('width', '100');
-            pattern.setAttribute('height', '100');
-            const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
-            img.setAttribute('width', '100');
-            img.setAttribute('height', '100');
-            pattern.appendChild(img);
-            defs.appendChild(pattern);
-        }
-        pattern.querySelector('image').setAttribute('href', url);
-    }
+        <div class="space-y-4">
+            <div class="bg-white/5 p-4 rounded-xl border border-white/10">
+                <span class="text-[10px] uppercase text-slate-400">Prix de conquête</span>
+                <p id="country-price" class="text-3xl font-mono font-bold text-blue-400">1.00 €</p>
+            </div>
 
-    // Charger les frontières et les données Firestore
-    Promise.all([
-        fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
-        fetch('/api/countries').then(r => r.json())
-    ]).then(([geoData, dbData]) => {
-        L.geoJSON(geoData, {
-            style: (f) => {
-                const iso = f.properties.iso_a3;
-                if(dbData[iso] && dbData[iso].image_url) {
-                    updatePattern(iso, dbData[iso].image_url);
-                    return { fillOpacity: 0.7, fillColor: `url(#pat-${iso})`, color: '#334155', weight: 1 };
-                }
-                return { fillOpacity: 0.2, fillColor: '#1e293b', color: '#334155', weight: 1 };
-            },
-            onEachFeature: (f, layer) => {
-                layer.on('click', () => {
-                    selectedISO = f.properties.iso_a3;
-                    document.getElementById('country-name').innerText = f.properties.name;
-                    document.getElementById('country-code').innerText = selectedISO;
-                    document.getElementById('country-info').classList.remove('hidden');
-                    const data = dbData[selectedISO] || {price: 1.0};
-                    document.getElementById('country-price').innerText = data.price.toFixed(2) + " €";
-                });
+            <div>
+                <label class="block text-[10px] uppercase text-slate-400 mb-2 ml-1">URL de votre image</label>
+                <input type="text" id="image-url" placeholder="https://imgur.com/image.png" 
+                       class="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <button onclick="processPurchase()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
+                ACHETER CE PAYS
+            </button>
+            <p class="text-[9px] text-center text-slate-500 uppercase tracking-tighter">Prix +20% après achat</p>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', {
+            zoomControl: false,
+            minZoom: 2,
+            maxBounds: [[-90, -180], [90, 180]]
+        }).setView([20, 0], 2);
+
+        let selectedISO = null;
+        let countriesDB = {};
+
+        // Style de la carte Ultra Dark
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png').addTo(map);
+
+        function updatePattern(id, url) {
+            let svg = document.querySelector('.leaflet-zoom-animated svg');
+            if(!svg) return;
+            let defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS("http://www.w3.org/2000/svg", "defs"), svg.firstChild);
+            
+            let pattern = document.getElementById('pat-'+id);
+            if(!pattern) {
+                pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+                pattern.setAttribute('id', 'pat-'+id);
+                pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+                pattern.setAttribute('width', '150');
+                pattern.setAttribute('height', '150');
+                const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
+                img.setAttribute('width', '150');
+                img.setAttribute('height', '150');
+                img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+                pattern.appendChild(img);
+                defs.appendChild(pattern);
             }
-        }).addTo(map);
-    });
-
-    async function processPurchase() {
-        const url = document.getElementById('image-url').value;
-        if(!url) return alert("Mettez une URL d'image !");
-        
-        const res = await fetch('/buy-country', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({code: selectedISO, image_url: url})
-        });
-        const result = await res.json();
-        if(result.success) {
-            alert("Pays conquis !");
-            location.reload();
-        } else {
-            alert(result.error);
+            pattern.querySelector('image').setAttribute('href', url);
         }
-    }
-</script>
+
+        function refreshData() {
+            Promise.all([
+                fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
+                fetch('/api/countries').then(r => r.json())
+            ]).then(([geoData, dbData]) => {
+                countriesDB = dbData;
+                renderMap(geoData);
+                renderScoreboard();
+            });
+        }
+
+        function renderMap(data) {
+            L.geoJSON(data, {
+                style: (f) => {
+                    const iso = f.properties.iso_a3;
+                    if(countriesDB[iso] && countriesDB[iso].image_url) {
+                        updatePattern(iso, countriesDB[iso].image_url);
+                        return { fillOpacity: 0.9, fillColor: `url(#pat-${iso})`, color: '#3b82f6', weight: 0.5 };
+                    }
+                    return { fillOpacity: 0.3, fillColor: '#1e293b', color: '#334155', weight: 0.5 };
+                },
+                onEachFeature: (f, layer) => {
+                    layer.on('click', (e) => {
+                        selectedISO = f.properties.iso_a3;
+                        document.getElementById('country-name').innerText = f.properties.name;
+                        document.getElementById('country-code').innerText = selectedISO;
+                        const data = countriesDB[selectedISO] || {price: 1.0};
+                        document.getElementById('country-price').innerText = data.price.toFixed(2) + " €";
+                        
+                        const panel = document.getElementById('buy-panel');
+                        panel.classList.remove('hidden');
+                        setTimeout(() => panel.classList.remove('translate-x-full'), 10);
+                        L.DomEvent.stopPropagation(e);
+                    });
+                }
+            }).addTo(map);
+        }
+
+        function renderScoreboard() {
+            const sorted = Object.entries(countriesDB)
+                .sort((a,b) => b[1].price - a[1].price)
+                .slice(0, 5);
+            
+            const container = document.getElementById('scoreboard');
+            container.innerHTML = sorted.map(([iso, data], i) => `
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-slate-500">#${i+1} ${iso}</span>
+                    <span class="font-bold text-blue-400">${data.price.toFixed(2)}€</span>
+                </div>
+            `).join('') || '<p class="text-xs text-slate-500 italic">Aucun pays conquis</p>';
+        }
+
+        function closePanel() {
+            const panel = document.getElementById('buy-panel');
+            panel.classList.add('translate-x-full');
+            setTimeout(() => panel.classList.add('hidden'), 300);
+        }
+
+        async function processPurchase() {
+            const url = document.getElementById('image-url').value;
+            if(!url) return alert("URL de l'image requise !");
+            
+            const res = await fetch('/buy-country', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: selectedISO, image_url: url})
+            });
+            const result = await res.json();
+            if(result.success) {
+                location.reload();
+            } else {
+                alert(result.error);
+            }
+        }
+
+        map.on('click', closePanel);
+        refreshData();
+    </script>
 </body>
 </html>
