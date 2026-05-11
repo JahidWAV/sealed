@@ -1,55 +1,43 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <title>Sealed - Dashboard</title>
-</head>
-<body class="bg-gray-900 text-white min-h-screen p-4 md:p-8">
-    <div class="max-w-4xl mx-auto">
-        <!-- Barre de navigation -->
-        <nav class="flex justify-between items-center mb-12">
-            <h1 class="text-2xl font-black tracking-tighter text-blue-500">SEALED.</h1>
-            <div class="flex items-center gap-4">
-                <span class="text-gray-400 hidden md:inline">Bienvenue, <span class="text-white font-semibold">{{ user.username }}</span></span>
-                <a href="/logout" class="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-4 py-2 rounded-lg text-sm font-bold transition">Déconnexion</a>
+<!-- Dans la section Actions de ton dashboard.html -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
+    
+    <!-- FORMULAIRE D'ENVOI REEL -->
+    <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+        <h3 class="text-xl font-bold mb-6 flex items-center gap-2">
+            <span class="text-blue-500">●</span> Envoyer des fonds
+        </h3>
+        <form action="/send" method="POST" class="space-y-4">
+            <div>
+                <label class="text-xs text-gray-500 uppercase font-bold px-1">Adresse du destinataire</label>
+                <input type="text" name="recipient_address" placeholder="0x..." class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:border-blue-500 outline-none transition" required>
             </div>
-        </nav>
-
-        <!-- Carte du Portefeuille -->
-        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl mb-8 relative overflow-hidden">
-            <div class="absolute top-0 right-0 p-8 opacity-10">
-                <svg width="120" height="120" fill="currentColor" viewBox="0 0 24 24"><path d="M21 18l-3-3h-5l-2 2H3a1 1 0 00-1 1v4a1 1 0 001 1h18a1 1 0 001-1v-4a1 1 0 00-1-1zm-9 3H4v-2h7l1 1 1-1h7v2h-8zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+            <div>
+                <label class="text-xs text-gray-500 uppercase font-bold px-1">Montant (€)</label>
+                <input type="number" step="0.01" name="amount" placeholder="0.00" class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:border-blue-500 outline-none transition" required>
             </div>
-            
-            <p class="text-blue-400 uppercase text-xs font-black tracking-widest mb-2">Solde Total</p>
-            <h2 class="text-6xl font-black mb-8">{{ "%.2f"|format(user.balance) }} €</h2>
-            
-            <div class="bg-black/30 p-4 rounded-xl border border-white/5">
-                <p class="text-xs text-gray-500 mb-2 uppercase font-bold tracking-tighter">Adresse Publique (Blockchain)</p>
-                <code class="text-blue-300 font-mono text-sm break-all">{{ user.wallet_address }}</code>
-            </div>
-        </div>
-
-        <!-- Section Actions (Maquette pour l'instant) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button class="bg-gray-800 border border-gray-700 p-6 rounded-2xl hover:border-blue-500 transition text-left group">
-                <div class="text-blue-500 mb-2 group-hover:scale-110 transition duration-300">
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                </div>
-                <h3 class="font-bold text-lg text-white text-left">Envoyer</h3>
-                <p class="text-gray-400 text-sm">Transférer des fonds instantanément.</p>
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-black transition transform active:scale-95 shadow-lg">
+                CONFIRMER LE TRANSFERT
             </button>
+        </form>
+    </div>
 
-            <button class="bg-gray-800 border border-gray-700 p-6 rounded-2xl hover:border-green-500 transition text-left group">
-                <div class="text-green-500 mb-2 group-hover:scale-110 transition duration-300">
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+    <!-- HISTORIQUE DES TRANSACTIONS -->
+    <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+        <h3 class="text-xl font-bold mb-6">Derniers mouvements</h3>
+        <div class="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+            {% if transactions %}
+                {% for tx in transactions %}
+                <div class="flex justify-between items-center p-3 bg-gray-900/50 rounded-xl border border-gray-700">
+                    <div>
+                        <p class="text-xs text-gray-500">{{ tx.timestamp.strftime('%d/%m/%Y %H:%M') }}</p>
+                        <p class="text-sm font-mono text-gray-300">Vers: {{ tx.recipient_address[:10] }}...</p>
+                    </div>
+                    <span class="text-red-400 font-bold">- {{ "%.2f"|format(tx.amount) }} €</span>
                 </div>
-                <h3 class="font-bold text-lg text-white">Recevoir</h3>
-                <p class="text-gray-400 text-sm">Afficher votre QR Code de dépôt.</p>
-            </button>
+                {% endfor %}
+            {% else %}
+                <p class="text-gray-600 text-center py-10">Aucune transaction effectuée.</p>
+            {% endif %}
         </div>
     </div>
-</body>
-</html>
+</div>
