@@ -3,135 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>THE DOLLAR MAP</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap" rel="stylesheet">
+    <title>THE DOLLAR MAP | Global Domination</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.stripe.com/v3/"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
     <style>
-        :root { --bg: #05070a; }
-        body, html { margin: 0; height: 100%; background: var(--bg); font-family: 'Plus Jakarta Sans', sans-serif; color: white; overflow: hidden; }
+        :root { --neon: #00f2ff; --bg: #0a0c10; --panel: rgba(13, 17, 23, 0.95); }
+        body, html { margin: 0; height: 100%; background: var(--bg); font-family: 'JetBrains Mono', monospace; color: white; overflow: hidden; }
+        
         #map { position: absolute; inset: 0; background: var(--bg) !important; z-index: 1; }
-        .glass { background: rgba(10, 15, 25, 0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .country-style { transition: all 0.2s ease; cursor: pointer; outline: none; }
-        .leaflet-tile-pane { filter: brightness(0.2) contrast(1.2); }
-        .leaflet-control-zoom { display: none !important; }
-        .panel-slide { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        .ui-border { border: 1px solid rgba(0, 242, 255, 0.2); box-shadow: 0 0 15px rgba(0, 242, 255, 0.05); }
+        .neon-text { color: var(--neon); text-shadow: 0 0 10px rgba(0, 242, 255, 0.5); }
+        .neon-btn { background: var(--neon); color: black; font-weight: 800; transition: all 0.3s; }
+        .neon-btn:hover { box-shadow: 0 0 20px var(--neon); transform: translateY(-2px); }
+
+        /* Style de la carte */
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.15) contrast(1.5); }
+        .country-active { cursor: crosshair !important; transition: 0.3s; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--neon); }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
 
-    <div class="absolute top-8 left-8 z-[1000]">
-        <div class="glass px-8 py-5 rounded-3xl">
-            <h1 class="text-xl font-extrabold italic uppercase tracking-tighter">THE DOLLAR MAP<span class="text-blue-500">.COM</span></h1>
+    <div class="absolute top-0 left-0 right-0 z-[1000] p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent">
+        <div class="flex items-center gap-4">
+            <div class="h-10 w-1 bg-cyan-400"></div>
+            <h1 class="text-2xl font-black italic tracking-tighter uppercase">THE DOLLAR MAP</h1>
+        </div>
+        
+        <div id="auth-section" class="flex gap-4">
+            <button onclick="showAuthModal()" class="text-[10px] uppercase tracking-widest border border-cyan-400/30 px-6 py-2 hover:bg-cyan-400/10 transition-all">Login / Register</button>
+        </div>
+        <div id="user-section" class="hidden flex items-center gap-6">
+            <span id="user-display" class="text-[10px] neon-text uppercase tracking-widest"></span>
+            <button onclick="logout()" class="text-[10px] opacity-50 hover:opacity-100 uppercase tracking-widest">Logout</button>
         </div>
     </div>
 
-    <div id="buy-panel" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] w-[450px] glass rounded-[2.5rem] p-10 opacity-0 translate-y-32 pointer-events-none panel-slide">
-        <div class="flex justify-between items-start mb-8">
-            <h2 id="country-name" class="text-4xl font-black italic uppercase">Country</h2>
-            <button onclick="closePanel()" class="text-slate-500 hover:text-white">✕</button>
+    <div class="absolute top-24 right-8 z-[1000] w-72 h-[60vh] flex flex-col">
+        <div class="ui-border bg-[#0d1117]/90 p-6 rounded-sm backdrop-blur-md flex-1 overflow-hidden">
+            <h2 class="text-[10px] font-bold uppercase tracking-[0.3em] text-cyan-400/60 mb-6 flex justify-between">
+                Global Ranking <span>LIVE</span>
+            </h2>
+            <div id="scoreboard" class="space-y-6 overflow-y-auto h-full pr-2">
+                </div>
         </div>
+    </div>
+
+    <div id="buy-panel" class="absolute bottom-10 left-10 z-[1000] w-96 ui-border bg-[#0d1117]/95 p-8 translate-x-[-120%] transition-all duration-500 rounded-sm">
+        <div class="mb-8">
+            <p class="text-[9px] text-cyan-400/50 uppercase tracking-widest mb-1">Target Coordinates</p>
+            <h2 id="country-name" class="text-3xl font-bold uppercase tracking-tighter italic">N/A</h2>
+        </div>
+
         <div class="grid grid-cols-2 gap-4 mb-8">
-            <div class="bg-white/5 p-5 rounded-2xl">
-                <p class="text-[9px] font-bold text-slate-500 uppercase mb-1">Current Price</p>
-                <div id="country-price" class="text-xl font-bold">1.00 $</div>
+            <div class="p-4 bg-white/5 border-l-2 border-cyan-400/20">
+                <p class="text-[8px] uppercase text-slate-500">Market Price</p>
+                <div id="country-price" class="text-lg font-bold">$1.00</div>
             </div>
-            <div class="bg-blue-500/10 p-5 rounded-2xl border border-blue-500/20">
-                <p class="text-[9px] font-bold text-blue-500 uppercase mb-1">Your Bid ($)</p>
-                <input type="number" id="custom-price" step="0.01" class="w-full bg-transparent text-xl font-bold outline-none text-white">
+            <div class="p-4 bg-cyan-400/5 border-l-2 border-cyan-400">
+                <p class="text-[8px] uppercase text-cyan-400">New Offer ($)</p>
+                <input type="number" id="custom-price" class="w-full bg-transparent text-lg font-bold outline-none text-white">
             </div>
         </div>
-        <button id="pay-button" onclick="initiatePayment()" class="w-full bg-blue-600 hover:bg-blue-500 py-6 rounded-2xl font-black uppercase text-xs tracking-widest transition-all">PAY & CONQUER</button>
+
+        <button id="pay-button" onclick="initiatePayment()" class="w-full neon-btn py-5 text-xs tracking-[0.3em] uppercase">Initialize Conquest</button>
+    </div>
+
+    <div id="auth-modal" class="hidden fixed inset-0 z-[2000] bg-black/90 backdrop-blur-md flex items-center justify-center">
+        <div class="w-96 p-10 ui-border bg-[#0d1117]">
+            <h3 class="text-xl font-bold mb-6 uppercase italic">Access Terminal</h3>
+            <input type="email" id="auth-email" placeholder="EMAIL" class="w-full bg-white/5 border border-white/10 p-4 mb-4 text-xs outline-none focus:border-cyan-400">
+            <input type="password" id="auth-pass" placeholder="PASSWORD" class="w-full bg-white/5 border border-white/10 p-4 mb-6 text-xs outline-none focus:border-cyan-400">
+            <div class="flex gap-2">
+                <button onclick="handleAuth('login')" class="flex-1 neon-btn py-3 text-[10px]">LOGIN</button>
+                <button onclick="handleAuth('register')" class="flex-1 border border-cyan-400 text-cyan-400 py-3 text-[10px]">SIGNUP</button>
+            </div>
+            <button onclick="hideAuthModal()" class="w-full mt-4 text-[9px] text-slate-500 uppercase">Cancel</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Ta clé publique fournie
-        const stripe = Stripe('pk_test_51TVjwdGsTyjMzFLCrl6ZBH80WEz53136nqOUrXUOYiJV2C0vLsQrkrzOgY1edwVnaH7DAUvemMWFnrFMc9ZRWRr200AfgGOSgy'); 
+        // CONFIG FIREBASE (REMPLACE PAR TES INFOS)
+        const firebaseConfig = {
+            apiKey: "AIzaSy...",
+            authDomain: "ton-projet.firebaseapp.com",
+            projectId: "ton-projet",
+            storageBucket: "ton-projet.appspot.com",
+            messagingSenderId: "...",
+            appId: "..."
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const stripe = Stripe('pk_test_...'); 
 
-        const map = L.map('map', { zoomControl: false, minZoom: 2.3, maxZoom: 5, worldCopyJump: false, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1.0 }).setView([20, 0], 2.4);
+        const map = L.map('map', { zoomControl: false, minZoom: 2.3 }).setView([20, 0], 2.4);
         let countriesDB = {};
-        let geoLayer;
-        let selectedISO = null;
+        let currentUser = null;
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png').addTo(map);
 
-        async function load() {
+        // --- AUTH LOGIC ---
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('auth-section').classList.add('hidden');
+                document.getElementById('user-section').classList.remove('hidden');
+                document.getElementById('user-display').innerText = user.email.split('@')[0];
+                hideAuthModal();
+            } else {
+                currentUser = null;
+                document.getElementById('auth-section').classList.remove('hidden');
+                document.getElementById('user-section').classList.add('hidden');
+            }
+        });
+
+        async function handleAuth(type) {
+            const email = document.getElementById('auth-email').value;
+            const pass = document.getElementById('auth-pass').value;
             try {
-                const [g, d] = await Promise.all([
-                    fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
-                    fetch('/api/countries').then(r => r.json())
-                ]);
-                countriesDB = d;
-                
-                geoLayer = L.geoJSON(g, {
-                    style: (f) => {
-                        const iso = f.properties.iso_a3;
-                        const isConquered = countriesDB[iso];
-                        return { 
-                            fillOpacity: 1, 
-                            fillColor: isConquered ? '#3b82f6' : '#161b22', 
-                            color: isConquered ? '#60a5fa' : '#2d333b', 
-                            weight: 1, 
-                            className: 'country-style' 
-                        };
-                    },
-                    onEachFeature: (f, layer) => {
-                        layer.on({
-                            mouseover: (e) => { e.target.setStyle({ weight: 2, color: '#ffffff' }); },
-                            mouseout: (e) => { geoLayer.resetStyle(e.target); },
-                            click: (e) => {
-                                selectedISO = f.properties.iso_a3;
-                                const data = countriesDB[selectedISO];
-                                document.getElementById('country-name').innerText = f.properties.name;
-                                let minVal = data ? Math.max(1.00, data.price * 1.2).toFixed(2) : "1.00";
-                                document.getElementById('country-price').innerText = data ? data.price.toFixed(2) + " $" : "FREE";
-                                document.getElementById('custom-price').value = minVal;
-                                document.getElementById('buy-panel').classList.remove('opacity-0', 'translate-y-32', 'pointer-events-none');
-                                L.DomEvent.stopPropagation(e);
-                            }
-                        });
-                    }
-                }).addTo(map);
-            } catch(e) { console.error("Load error:", e); }
+                if(type === 'login') await auth.signInWithEmailAndPassword(email, pass);
+                else await auth.createUserWithEmailAndPassword(email, pass);
+            } catch(e) { alert(e.message); }
+        }
+
+        function showAuthModal() { document.getElementById('auth-modal').classList.remove('hidden'); }
+        function hideAuthModal() { document.getElementById('auth-modal').classList.add('hidden'); }
+        function logout() { auth.signOut(); }
+
+        // --- MAP & DATA ---
+        async function load() {
+            const [g, d] = await Promise.all([
+                fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
+                fetch('/api/countries').then(r => r.json())
+            ]);
+            countriesDB = d;
+            
+            L.geoJSON(g, {
+                style: (f) => {
+                    const isConquered = countriesDB[f.properties.iso_a3];
+                    return {
+                        fillOpacity: 1,
+                        fillColor: isConquered ? '#00f2ff' : '#111418',
+                        color: isConquered ? '#00f2ff' : '#222',
+                        weight: isConquered ? 1.5 : 0.5,
+                        className: 'country-active'
+                    };
+                },
+                onEachFeature: (f, layer) => {
+                    layer.on('click', (e) => {
+                        selectedISO = f.properties.iso_a3;
+                        const data = countriesDB[selectedISO];
+                        document.getElementById('country-name').innerText = f.properties.name;
+                        let minVal = data ? (data.price * 1.2).toFixed(2) : "1.00";
+                        document.getElementById('country-price').innerText = data ? `$${data.price.toFixed(2)}` : "UNCLAIMED";
+                        document.getElementById('custom-price').value = minVal;
+                        document.getElementById('buy-panel').style.transform = "translateX(0)";
+                        L.DomEvent.stopPropagation(e);
+                    });
+                }
+            }).addTo(map);
+            renderLeaderboard();
+        }
+
+        function renderLeaderboard() {
+            const sorted = Object.entries(countriesDB).sort((a,b) => b[1].price - a[1].price);
+            document.getElementById('scoreboard').innerHTML = sorted.map(([iso, data]) => `
+                <div class="border-b border-white/5 pb-4">
+                    <div class="flex justify-between text-[11px] font-bold mb-1">
+                        <span class="text-white">${iso}</span>
+                        <span class="text-cyan-400">$${data.price.toFixed(0)}</span>
+                    </div>
+                    <div class="text-[8px] text-slate-500 uppercase tracking-tighter">Owner: ${data.owner_name || 'Legacy'}</div>
+                </div>
+            `).join('') || '<p class="text-[9px] text-center opacity-20">NO DATA FOUND</p>';
         }
 
         async function initiatePayment() {
+            if(!currentUser) return showAuthModal();
             const btn = document.getElementById('pay-button');
-            const price = document.getElementById('custom-price').value;
-            
-            btn.innerText = "OPENING SECURE PORTAL...";
-            btn.disabled = true;
+            btn.innerText = "AUTHENTICATING..."; btn.disabled = true;
 
-            try {
-                const response = await fetch('/create-checkout-session', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ code: selectedISO, price: price })
-                });
-                
-                const session = await response.json();
-
-                if (session.id) {
-                    // Redirection vers Stripe
-                    const result = await stripe.redirectToCheckout({ sessionId: session.id });
-                    if (result.error) alert(result.error.message);
-                } else {
-                    alert("Server Error: " + (session.error || "Could not create session"));
-                }
-            } catch (err) {
-                console.error(err);
-                alert("Network error. Please try again.");
-            } finally {
-                btn.innerText = "PAY & CONQUER";
-                btn.disabled = false;
-            }
+            const res = await fetch('/create-checkout-session', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    code: selectedISO, 
+                    price: document.getElementById('custom-price').value,
+                    user_id: currentUser.uid,
+                    username: currentUser.email.split('@')[0]
+                })
+            });
+            const session = await res.json();
+            if(session.id) stripe.redirectToCheckout({ sessionId: session.id });
+            else { alert(session.error); btn.innerText = "INITIALIZE CONQUEST"; btn.disabled = false; }
         }
 
-        function closePanel() { document.getElementById('buy-panel').classList.add('opacity-0', 'translate-y-32', 'pointer-events-none'); }
+        function closePanel() { document.getElementById('buy-panel').style.transform = "translateX(-120%)"; }
         map.on('click', closePanel);
         load();
     </script>
