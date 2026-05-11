@@ -13,11 +13,11 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'sealed_master_2026')
 bcrypt = Bcrypt(app)
 
-# --- CONFIGURATION STRIPE ---
+# --- CONFIG STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
 
-# --- CONFIGURATION FIREBASE ---
+# --- CONFIG FIREBASE ---
 if not firebase_admin._apps:
     fb_config = os.environ.get('FIREBASE_CONFIG')
     if fb_config:
@@ -25,7 +25,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK ---
+# --- WEBHOOK (FIXED FOR PYTHON 3.14) ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -33,14 +33,20 @@ def webhook():
     sig_header = request.headers.get('Stripe-Signature')
 
     try:
-        # Vérification de la signature Stripe
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        # Vérification de la signature
+        stripe_event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        
+        # --- LA CORRECTION EST ICI ---
+        # On force la conversion en dictionnaire Python pur pour éviter l'AttributeError: get
+        event = json.loads(json.dumps(stripe_event.to_dict_recursive()))
+        
     except Exception as e:
-        print(f"❌ ERREUR SIGNATURE : {e}")
+        print(f"❌ ERREUR SIGNATURE/FORMAT : {e}")
         return jsonify(success=False), 400
 
     event_type = event.get('type')
-    
+    print(f"📩 Webhook validé : {event_type}")
+
     if event_type in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
         session_obj = event.get('data', {}).get('object', {})
         session_id = session_obj.get('id')
@@ -48,37 +54,33 @@ def webhook():
         username = metadata.get('username')
         
         if not username:
-            print("⚠️ Webhook reçu sans username dans metadata.")
             return jsonify(success=True), 200
 
         try:
-            # 1. Vérification anti-doublon
+            # Vérification anti-doublon
             existing_tx = db.collection('transactions').where('stripe_session_id', '==', session_id).limit(1).get()
             if len(existing_tx) > 0:
-                print(f"ℹ️ Session {session_id} déjà créditée.")
+                print(f"ℹ️ Déjà traité : {session_id}")
                 return jsonify(success=True), 200
 
-            # 2. Calcul du montant net (Frais : 1.2% + 0.25€)
+            # Calcul financier
             amount_total = session_obj.get('amount_total', 0)
             net_amount = round((amount_total / 100) * 0.988 - 0.25, 2)
             
-            # 3. Mise à jour Firebase
             user_ref = db.collection('users').document(username)
             user_snap = user_ref.get()
             
             if user_snap.exists:
-                user_data = user_snap.to_dict()
-                current_bal = float(user_data.get('balance', 0.0) or 0.0)
-                new_bal = round(current_bal + net_amount, 2)
+                user_dict = user_snap.to_dict()
+                new_bal = round(float(user_dict.get('balance', 0.0) or 0.0) + net_amount, 2)
                 
-                # Utilisation d'un Batch pour garantir l'atomicité
                 batch = db.batch()
                 batch.update(user_ref, {'balance': new_bal})
                 
-                tx_ref = db.collection('transactions').document()
-                batch.set(tx_ref, {
+                # Log de la transaction
+                batch.set(db.collection('transactions').document(), {
                     'sender_un': 'STRIPE_SYSTEM',
-                    'recipient_addr': user_data.get('wallet_address'),
+                    'recipient_addr': user_dict.get('wallet_address'),
                     'amount': net_amount,
                     'type': 'deposit',
                     'stripe_session_id': session_id,
@@ -86,16 +88,14 @@ def webhook():
                 })
                 batch.commit()
                 print(f"✅ CRÉDIT RÉUSSI : {username} (+{net_amount}€)")
-            else:
-                print(f"❌ Utilisateur {username} introuvable dans la base.")
-                
+            
         except Exception as e:
-            print(f"❌ ERREUR FIREBASE : {e}")
+            print(f"❌ ERREUR DB : {e}")
             return jsonify(success=False), 500
 
     return jsonify(success=True), 200
 
-# --- ROUTES DASHBOARD & PAIEMENT ---
+# --- ROUTES DASHBOARD ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -131,18 +131,17 @@ def create_checkout_session():
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
     user_data = db.collection('users').document(session['user_id']).get().to_dict()
-    # Requête simplifiée sans FieldFilter
     tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
     return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
-# --- AUTHENTIFICATION ---
+# --- AUTH ---
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         un = request.form.get('username').lower().strip()
         if db.collection('users').document(un).get().exists:
-            flash("Pseudo déjà pris.", "danger")
+            flash("Pseudo pris.", "danger")
             return redirect(url_for('register'))
         hashed = bcrypt.generate_password_hash(request.form.get('password')).decode('utf-8')
         sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
