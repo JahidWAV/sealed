@@ -24,7 +24,7 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK : LE MOTEUR DE CRÉDIT ---
+# --- WEBHOOK : RÉCEPTION DES FONDS ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -40,7 +40,7 @@ def webhook():
         username = session_stripe['metadata'].get('username')
         gross_amount = session_stripe['amount_total'] / 100
         
-        # Calcul Frais (1.2% + 0.25€)
+        # Solution A : Frais 1.2% + 0.25€
         fees = (gross_amount * 0.012) + 0.25
         net_amount = round(gross_amount - fees, 2)
         
@@ -51,7 +51,7 @@ def webhook():
             @firestore.transactional
             def update_balance(transaction, user_ref, amount):
                 snapshot = user_ref.get(transaction=transaction)
-                new_balance = snapshot.get('balance') + amount
+                new_balance = snapshot.get('balance', 0.0) + amount
                 transaction.update(user_ref, {'balance': new_balance})
                 
                 tx_ref = db.collection('transactions').document()
@@ -67,7 +67,7 @@ def webhook():
 
     return jsonify(success=True)
 
-# --- CRÉATION DE SESSION (CORRIGÉE) ---
+# --- DÉPÔT (SESSION AVEC FIX EU_BANK_TRANSFER) ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -77,36 +77,36 @@ def create_checkout_session():
         amount = float(request.form.get('amount'))
         username = session['user_id']
         
-        # 1. Récupérer ou créer le client Stripe
         user_ref = db.collection('users').document(username)
         user_data = user_ref.get().to_dict()
-        
         stripe_customer_id = user_data.get('stripe_customer_id')
         
         if not stripe_customer_id:
-            # Création chez Stripe
             customer = stripe.Customer.create(
-                description=f"Client Sealed: {username}",
+                description=f"Sealed User: {username}",
                 metadata={'username': username}
             )
             stripe_customer_id = customer.id
-            # Sauvegarde dans Firebase pour la prochaine fois
             user_ref.update({'stripe_customer_id': stripe_customer_id})
 
-        # 2. Créer la session avec l'ID client
         checkout_session = stripe.checkout.Session.create(
-            customer=stripe_customer_id, # INDISPENSABLE POUR LE VIREMENT
+            customer=stripe_customer_id,
             payment_method_types=['card', 'customer_balance'],
             payment_method_options={
                 'customer_balance': {
                     'funding_type': 'bank_transfer',
-                    'bank_transfer': {'type': 'eu_bank_transfer'}
+                    'bank_transfer': {
+                        'type': 'eu_bank_transfer',
+                        'eu_bank_transfer': {
+                            'country': 'FR' # Spécifie le pays pour éviter l'erreur de valeur requise
+                        }
+                    }
                 }
             },
             line_items=[{
                 'price_data': {
                     'currency': 'eur',
-                    'product_data': {'name': 'Approvisionnement Sealed'},
+                    'product_data': {'name': 'Dépôt Sealed Wallet'},
                     'unit_amount': int(amount * 100),
                 },
                 'quantity': 1,
@@ -128,7 +128,7 @@ def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
     user_data = db.collection('users').document(session['user_id']).get().to_dict()
     if request.args.get('status') == 'pending':
-        flash("Demande reçue. Si virement instantané, le solde sera mis à jour sous peu.", "success")
+        flash("Demande reçue. Pour les virements, l'IBAN s'affiche sur la page de paiement.", "success")
     tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
     return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
@@ -167,7 +167,7 @@ def withdraw():
         amount = float(request.form.get('amount'))
         iban = request.form.get('iban').strip().upper()
         user_ref = db.collection('users').document(session['user_id'])
-        bal = user_ref.get().to_dict()['balance']
+        bal = user_ref.get().to_dict().get('balance', 0.0)
         if bal < amount: flash("Solde insuffisant.", "danger")
         else:
             user_ref.update({'balance': bal - amount})
