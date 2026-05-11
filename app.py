@@ -7,7 +7,7 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'conquest_prime_2026')
+app.secret_key = os.environ.get('SECRET_KEY', 'conquest_2026_secure_key')
 
 # --- CONFIG STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
@@ -30,7 +30,6 @@ def index():
 @app.route('/api/countries')
 def get_countries():
     try:
-        # On récupère les pays et on enrichit avec le nom de l'owner si besoin
         countries_ref = db.collection('territories').stream()
         return jsonify({c.id: c.to_dict() for c in countries_ref})
     except Exception as e:
@@ -42,20 +41,22 @@ def create_checkout_session():
         data = request.json
         iso_code = data.get('code')
         proposed_price = round(float(data.get('price', 0)), 2)
-        user_id = data.get('user_id') # Envoyé depuis le front après connexion
-        username = data.get('username', 'Anonymous')
+        user_id = data.get('user_id')
+        username = data.get('username') # Le pseudo choisi par l'user
 
         if not user_id:
-            return jsonify(error="Authentication required"), 401
+            return jsonify(error="Auth required"), 401
 
         base_url = request.host_url.rstrip('/')
+        
+        # Vérification prix
         doc = db.collection('territories').document(iso_code).get()
         min_allowed = 1.00
         if doc.exists:
             min_allowed = max(1.00, round(doc.to_dict().get('price', 0) * 1.2, 2))
 
         if proposed_price < min_allowed:
-            return jsonify(error=f"Min bid: {min_allowed}$"), 400
+            return jsonify(error=f"Price too low"), 400
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -63,15 +64,14 @@ def create_checkout_session():
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': f"CONQUEST: {iso_code}",
-                        'description': f"Commander: {username}",
+                        'name': f"TERRITORY: {iso_code}",
+                        'description': f"New Commander: {username}",
                     },
                     'unit_amount': int(proposed_price * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            # On passe l'UID et le Username dans le succès pour marquer le territoire
             success_url=f"{base_url}/success?code={iso_code}&price={proposed_price}&uid={user_id}&user={username}",
             cancel_url=f"{base_url}/",
         )
