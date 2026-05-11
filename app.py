@@ -25,7 +25,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- ROUTE WEBHOOK SÉCURISÉE ---
+# --- WEBHOOK ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -33,84 +33,69 @@ def webhook():
     sig_header = request.headers.get('Stripe-Signature')
 
     try:
-        # Vérification officielle de la signature Stripe
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
+        # Vérification de la signature Stripe
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except Exception as e:
         print(f"❌ ERREUR SIGNATURE : {e}")
         return jsonify(success=False), 400
 
-    # Type d'événement (ex: checkout.session.completed)
     event_type = event.get('type')
-    print(f"📩 Webhook sécurisé reçu : {event_type}")
-
+    
     if event_type in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
         session_obj = event.get('data', {}).get('object', {})
-        
-        # ID unique de session (pour éviter de créditer 2 fois le même paiement)
         session_id = session_obj.get('id')
-        
-        # Récupération du username dans les metadata
         metadata = session_obj.get('metadata', {})
         username = metadata.get('username')
         
         if not username:
-            print("⚠️ Metadata 'username' manquante dans la session Stripe.")
+            print("⚠️ Webhook reçu sans username dans metadata.")
             return jsonify(success=True), 200
 
         try:
-            # --- PROTECTION ANTI-DOUBLON ---
-            tx_check = db.collection('transactions').where(
-                filter=firestore.FieldFilter('stripe_session_id', '==', session_id)
-            ).limit(1).get()
-            
-            if tx_check:
-                print(f"ℹ️ Session {session_id} déjà traitée. Skip.")
+            # 1. Vérification anti-doublon
+            existing_tx = db.collection('transactions').where('stripe_session_id', '==', session_id).limit(1).get()
+            if len(existing_tx) > 0:
+                print(f"ℹ️ Session {session_id} déjà créditée.")
                 return jsonify(success=True), 200
 
-            # --- CALCUL MONTANT NET ---
-            # (Montant / 100) - (Frais 1.2% + 0.25€)
+            # 2. Calcul du montant net (Frais : 1.2% + 0.25€)
             amount_total = session_obj.get('amount_total', 0)
             net_amount = round((amount_total / 100) * 0.988 - 0.25, 2)
             
+            # 3. Mise à jour Firebase
             user_ref = db.collection('users').document(username)
+            user_snap = user_ref.get()
             
-            @firestore.transactional
-            def update_balance(transaction, user_ref, amount, s_id):
-                snap = user_ref.get(transaction=transaction)
-                if not snap.exists: 
-                    return False
+            if user_snap.exists:
+                user_data = user_snap.to_dict()
+                current_bal = float(user_data.get('balance', 0.0) or 0.0)
+                new_bal = round(current_bal + net_amount, 2)
                 
-                u_data = snap.to_dict()
-                old_bal = float(u_data.get('balance', 0.0) or 0.0)
-                new_bal = round(old_bal + amount, 2)
+                # Utilisation d'un Batch pour garantir l'atomicité
+                batch = db.batch()
+                batch.update(user_ref, {'balance': new_bal})
                 
-                # Mise à jour du solde utilisateur
-                transaction.update(user_ref, {'balance': new_bal})
-                
-                # Création du log de transaction
-                transaction.set(db.collection('transactions').document(), {
+                tx_ref = db.collection('transactions').document()
+                batch.set(tx_ref, {
                     'sender_un': 'STRIPE_SYSTEM',
-                    'recipient_addr': u_data.get('wallet_address'),
-                    'amount': amount,
+                    'recipient_addr': user_data.get('wallet_address'),
+                    'amount': net_amount,
                     'type': 'deposit',
-                    'stripe_session_id': s_id,
+                    'stripe_session_id': session_id,
                     'timestamp': datetime.utcnow()
                 })
-                return True
-
-            # Exécution de la transaction atomique
-            if update_balance(db.transaction(), user_ref, net_amount, session_id):
+                batch.commit()
                 print(f"✅ CRÉDIT RÉUSSI : {username} (+{net_amount}€)")
-            
+            else:
+                print(f"❌ Utilisateur {username} introuvable dans la base.")
+                
         except Exception as e:
-            print(f"❌ Erreur DB : {e}")
+            print(f"❌ ERREUR FIREBASE : {e}")
             return jsonify(success=False), 500
 
     return jsonify(success=True), 200
 
-# --- ROUTES DASHBOARD ---
+# --- ROUTES DASHBOARD & PAIEMENT ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -146,7 +131,8 @@ def create_checkout_session():
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
     user_data = db.collection('users').document(session['user_id']).get().to_dict()
-    tx_docs = db.collection('transactions').where(filter=firestore.FieldFilter('sender_un', '==', session['user_id'])).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
+    # Requête simplifiée sans FieldFilter
+    tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
     return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
 # --- AUTHENTIFICATION ---
