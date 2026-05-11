@@ -7,12 +7,11 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'global_conquest_key_99')
+app.secret_key = os.environ.get('SECRET_KEY', 'conquest_direct_v1')
 
 # --- CONFIG STRIPE ---
-# Utilise ta clé sk_test habituelle ici
-stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', 'sk_test_51...') 
-DOMAIN = "https://sealed-votre-domaine.onrender.com" # Ton domaine Render actuel
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', 'sk_test_...') # Ta clé secrète
+DOMAIN = "https://votre-domaine.onrender.com" # Ton domaine Render
 
 # --- CONFIG FIREBASE ---
 firebase_config_json = os.environ.get('FIREBASE_CONFIG')
@@ -39,19 +38,20 @@ def get_countries():
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
+    """Crée une session Stripe pour un paiement direct sans solde préalable"""
     data = request.json
     iso_code = data.get('code')
     proposed_price = round(float(data.get('price', 0)), 2)
     image_url = data.get('image_url')
 
-    # Vérification sécurité prix
+    # Sécurité backend sur le prix
     doc = db.collection('territories').document(iso_code).get()
     min_allowed = 1.00
     if doc.exists:
         min_allowed = max(1.00, round(doc.to_dict().get('price', 0) * 1.2, 2))
 
     if proposed_price < min_allowed:
-        return jsonify(error=f"Price too low. Minimum: {min_allowed}$"), 400
+        return jsonify(error=f"Price too low. Min: {min_allowed}$"), 400
 
     try:
         checkout_session = stripe.checkout.Session.create(
@@ -61,14 +61,20 @@ def create_checkout_session():
                     'currency': 'usd',
                     'product_data': {
                         'name': f"CONQUEST: {iso_code}",
-                        'description': f"Propaganda URL: {image_url}",
+                        'description': f"Territory domination with custom image",
+                        'images': [image_url] if image_url.startswith('http') else [],
                     },
                     'unit_amount': int(proposed_price * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            # On passe les infos dans l'URL de succès pour mettre à jour la DB
+            # On stocke les infos dans metadata pour les retrouver après le paiement
+            metadata={
+                'iso_code': iso_code,
+                'price': proposed_price,
+                'image_url': image_url
+            },
             success_url=DOMAIN + f"/success?code={iso_code}&price={proposed_price}&img={image_url}",
             cancel_url=DOMAIN + "/",
         )
@@ -78,13 +84,14 @@ def create_checkout_session():
 
 @app.route('/success')
 def success():
+    """Route de retour après paiement Stripe réussi"""
     iso_code = request.args.get('code')
-    price = float(request.args.get('price'))
+    price = request.args.get('price')
     image_url = request.args.get('img')
 
     if iso_code and price and image_url:
         db.collection('territories').document(iso_code).set({
-            'price': price,
+            'price': float(price),
             'image_url': image_url,
             'last_update': datetime.utcnow()
         })
