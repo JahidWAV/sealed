@@ -15,7 +15,6 @@ bcrypt = Bcrypt(app)
 
 # --- CONFIG STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
-# On s'assure que le secret est propre
 endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
 
 # --- CONFIG FIREBASE ---
@@ -26,76 +25,61 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK (VERSION FINALE SANS FAILLES) ---
+# --- WEBHOOK ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # 1. Récupération du payload brut (Crucial pour la signature)
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
 
-    if not sig_header:
-        print("❌ Aucune signature Stripe trouvée dans les headers.")
-        return jsonify(success=False), 400
-
     try:
-        # 2. Vérification de la signature
-        # On utilise directement l'objet Stripe pour la validation
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
-        print(f"✅ Signature validée pour l'événement : {event['type']}")
-        
-    except ValueError as e:
-        # Payload invalide
-        print(f"❌ Payload invalide : {e}")
-        return jsonify(success=False), 400
-    except stripe.error.SignatureVerificationError as e:
-        # Signature invalide (Clé whsec incorrecte)
-        print(f"❌ Signature incorrecte : {e}")
-        return jsonify(success=False), 400
+        # 1. Validation de la signature
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except Exception as e:
-        print(f"❌ Autre erreur Webhook : {e}")
+        print(f"❌ Erreur Signature : {e}")
         return jsonify(success=False), 400
 
-    # 3. Traitement des données
-    # On transforme l'objet Stripe en dict proprement
-    event_dict = json.loads(json.dumps(event.to_dict_recursive()))
-    event_type = event_dict.get('type')
-
+    # 2. Extraction sécurisée du type et de l'objet
+    # On accède aux données via l'attribut ['data']['object'] de l'objet Stripe
+    event_type = event['type']
+    
     if event_type in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
-        session_obj = event_dict.get('data', {}).get('object', {})
+        session_obj = event['data']['object']
         session_id = session_obj.get('id')
+        
+        # Récupération Metadata
         metadata = session_obj.get('metadata', {})
         username = metadata.get('username')
         
         if not username:
-            print("⚠️ Pas de username dans metadata, session ignorée.")
+            print("⚠️ Aucun username trouvé dans les metadata Stripe.")
             return jsonify(success=True), 200
 
         try:
-            # Vérification anti-doublon simple
-            existing_tx = db.collection('transactions').where('stripe_session_id', '==', session_id).limit(1).get()
-            if len(existing_tx) > 0:
+            # 3. Check anti-doublon (Firestore)
+            tx_check = db.collection('transactions').where('stripe_session_id', '==', session_id).limit(1).get()
+            if len(tx_check) > 0:
                 print(f"ℹ️ Session {session_id} déjà traitée.")
                 return jsonify(success=True), 200
 
-            # Calcul financier
+            # 4. Calcul Montant
             amount_total = session_obj.get('amount_total', 0)
             net_amount = round((amount_total / 100) * 0.988 - 0.25, 2)
             
-            # Mise à jour Firebase
+            # 5. Update Firebase
             user_ref = db.collection('users').document(username)
             user_snap = user_ref.get()
             
             if user_snap.exists:
                 user_data = user_snap.to_dict()
-                new_bal = round(float(user_data.get('balance', 0.0) or 0.0) + net_amount, 2)
+                # On s'assure que le solde est bien un nombre
+                old_balance = float(user_data.get('balance', 0) or 0)
+                new_balance = round(old_balance + net_amount, 2)
                 
                 batch = db.batch()
-                batch.update(user_ref, {'balance': new_bal})
+                batch.update(user_ref, {'balance': new_balance})
                 
-                # Reçu de transaction
+                # Création du reçu
                 batch.set(db.collection('transactions').document(), {
                     'sender_un': 'STRIPE_SYSTEM',
                     'recipient_addr': user_data.get('wallet_address'),
@@ -105,15 +89,17 @@ def webhook():
                     'timestamp': datetime.utcnow()
                 })
                 batch.commit()
-                print(f"💰 CRÉDIT RÉUSSI : {username} (+{net_amount}€)")
-            
+                print(f"✅ CRÉDIT RÉUSSI : {username} (+{net_amount}€)")
+            else:
+                print(f"❌ Utilisateur {username} non trouvé.")
+
         except Exception as e:
-            print(f"❌ Erreur DB : {e}")
+            print(f"❌ ERREUR FIREBASE : {str(e)}")
             return jsonify(success=False), 500
 
     return jsonify(success=True), 200
 
-# --- LE RESTE DU CODE (DASHBOARD / AUTH) ---
+# --- ROUTES DASHBOARD ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -123,11 +109,13 @@ def create_checkout_session():
         username = session['user_id']
         user_ref = db.collection('users').document(username)
         user_data = user_ref.get().to_dict()
+        
         cust_id = user_data.get('stripe_customer_id')
         if not cust_id:
             customer = stripe.Customer.create(description=f"User: {username}", metadata={'username': username})
             cust_id = customer.id
             user_ref.update({'stripe_customer_id': cust_id})
+
         checkout_session = stripe.checkout.Session.create(
             customer=cust_id,
             payment_method_types=['card', 'customer_balance'],
@@ -150,13 +138,14 @@ def dashboard():
     tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
     return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
+# --- AUTH ---
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         un = request.form.get('username').lower().strip()
         if db.collection('users').document(un).get().exists:
-            flash("Pris.", "danger")
-            return redirect(url_for('register'))
+            flash("Pseudo pris.", "danger"); return redirect(url_for('register'))
         hashed = bcrypt.generate_password_hash(request.form.get('password')).decode('utf-8')
         sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
         addr = f"0x{hashlib.sha256(sk.get_verifying_key().to_string()).hexdigest()[:40]}"
@@ -170,19 +159,15 @@ def login():
         un = request.form.get('username').lower().strip()
         doc = db.collection('users').document(un).get()
         if doc.exists and bcrypt.check_password_hash(doc.to_dict()['password'], request.form.get('password')):
-            session['user_id'] = un
-            return redirect(url_for('dashboard'))
+            session['user_id'] = un; return redirect(url_for('dashboard'))
         flash("Login incorrect.", "danger")
     return render_template('login.html')
 
 @app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
+def logout(): session.clear(); return redirect(url_for('login'))
 
 @app.route('/')
-def home():
-    return redirect(url_for('dashboard')) if 'user_id' in session else redirect(url_for('login'))
+def home(): return redirect(url_for('dashboard')) if 'user_id' in session else redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
