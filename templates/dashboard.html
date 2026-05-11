@@ -3,243 +3,182 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>THE DOLLAR MAP | Global Domination</title>
-    
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    <title>THE DOLLAR MAP | Live Market</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
-    
+    <script src="https://js.stripe.com/v3/"></script>
     <style>
-        :root {
-            --bg-dark: #05070a;
-            --accent: #3b82f6;
-            --glass: rgba(13, 17, 23, 0.7);
+        :root { --bg: #02040a; --primary: #3b82f6; }
+        body, html { margin: 0; height: 100%; background: var(--bg); font-family: 'Plus Jakarta Sans', sans-serif; color: white; overflow: hidden; }
+        #map { position: absolute; inset: 0; background: var(--bg) !important; z-index: 1; }
+        
+        .glass { 
+            background: rgba(10, 15, 25, 0.85); 
+            backdrop-filter: blur(20px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        body, html { 
-            margin: 0; padding: 0; height: 100%; 
-            background: var(--bg-dark); 
-            font-family: 'Inter', sans-serif;
-            color: white;
-            overflow: hidden;
+        .occupied-glow {
+            filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.4));
+            transition: all 0.4s ease;
         }
 
-        #map { 
-            position: absolute; top: 0; bottom: 0; left: 0; right: 0;
-            background: var(--bg-dark) !important;
-            z-index: 1;
-        }
-
-        /* Glassmorphism Classes */
-        .glass {
-            background: var(--glass);
-            backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px -5px rgba(59, 130, 246, 0.5);
-        }
-
-        /* Smooth UI Transitions */
-        .panel-transition {
-            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        /* Custom Map Style Fixes */
-        .leaflet-tile-pane { filter: brightness(0.6) contrast(1.2) grayscale(0.2); }
-        .leaflet-container { background: var(--bg-dark) !important; }
+        .leaflet-tile-pane { filter: brightness(0.3) contrast(1.3) saturate(0.2); }
         .leaflet-control-zoom { display: none !important; }
+        .panel-slide { transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
 
-    <div class="absolute top-8 left-8 z-[1000]">
-        <div class="glass px-6 py-4 rounded-2xl">
-            <h1 class="text-2xl font-black italic tracking-tighter flex items-center gap-2">
-                <span class="text-blue-500">THE</span> DOLLAR MAP
+    <div class="absolute top-10 left-10 z-[1000]">
+        <div class="glass px-8 py-5 rounded-[2rem]">
+            <h1 class="text-2xl font-extrabold italic tracking-tighter uppercase">
+                THE DOLLAR MAP<span class="text-blue-500">.COM</span>
             </h1>
-            <div class="h-1 w-full bg-blue-500/20 mt-1 rounded-full overflow-hidden">
-                <div class="h-full bg-blue-500 animate-pulse" style="width: 40%"></div>
-            </div>
         </div>
     </div>
 
-    <div class="absolute top-8 right-8 z-[1000] w-80 space-y-4">
-        <div class="glass p-6 rounded-3xl flex justify-between items-center group">
-            <div>
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Available Funds</p>
-                <p id="user-balance" class="text-2xl font-black font-mono text-white">0.00 <span class="text-blue-500">$</span></p>
-            </div>
-            <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-all cursor-pointer">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>
-            </div>
-        </div>
-
-        <div class="glass rounded-3xl overflow-hidden">
-            <div class="p-6 border-b border-white/5">
-                <h2 class="text-xs font-black uppercase tracking-widest text-slate-400">Global Leaderboard</h2>
-            </div>
-            <div id="scoreboard" class="max-h-[50vh] overflow-y-auto p-2 space-y-1">
+    <div class="absolute top-10 right-10 z-[1000] w-80 space-y-4">
+        <div class="glass rounded-[2rem] p-6 shadow-2xl">
+            <h2 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-6">World Leaderboard</h2>
+            <div id="scoreboard" class="space-y-4">
                 </div>
         </div>
     </div>
 
-    <div id="buy-panel" class="absolute bottom-12 left-1/2 -translate-x-1/2 z-[1000] w-[500px] glass rounded-[2.5rem] p-10 panel-transition opacity-0 translate-y-20 pointer-events-none">
-        <div class="flex justify-between items-center mb-8">
+    <div id="buy-panel" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] w-[500px] glass rounded-[3rem] p-10 opacity-0 translate-y-32 pointer-events-none panel-slide">
+        <div class="flex justify-between items-start mb-8">
             <div>
-                <span class="text-blue-500 font-bold tracking-[0.3em] text-[10px] uppercase">Target Country</span>
-                <h2 id="country-name" class="text-4xl font-black italic uppercase tracking-tighter">N/A</h2>
+                <span class="text-blue-500 font-bold text-[10px] tracking-widest uppercase">Direct Occupation</span>
+                <h2 id="country-name" class="text-4xl font-black italic uppercase tracking-tighter">Country</h2>
             </div>
-            <button onclick="closePanel()" class="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all">✕</button>
+            <button onclick="closePanel()" class="bg-white/5 p-4 rounded-full hover:bg-white/10 transition-all">✕</button>
         </div>
 
         <div class="grid grid-cols-2 gap-6 mb-8">
-            <div class="space-y-1">
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Current Value</p>
-                <div class="text-2xl font-mono font-bold" id="country-price">1.00 $</div>
+            <div class="bg-black/40 p-5 rounded-3xl border border-white/5">
+                <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Current Value</p>
+                <div id="country-price" class="text-2xl font-bold">1.00 $</div>
             </div>
-            <div class="space-y-1">
-                <p class="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Your Bid ($)</p>
-                <input type="number" id="custom-price" class="w-full bg-transparent text-2xl font-mono font-bold border-b-2 border-blue-500/30 focus:border-blue-500 outline-none pb-1 transition-all">
+            <div class="bg-blue-500/10 p-5 rounded-3xl border border-blue-500/30">
+                <p class="text-[10px] font-bold text-blue-500 uppercase mb-2">Your Bid ($)</p>
+                <input type="number" id="custom-price" step="0.01" class="w-full bg-transparent text-2xl font-bold outline-none text-white">
             </div>
         </div>
 
         <div class="space-y-6">
             <div class="space-y-2">
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Propaganda Image URL</p>
-                <input type="text" id="image-url" placeholder="https://image-link.com/..." class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-sm focus:bg-white/10 outline-none transition-all">
+                <p class="text-[10px] font-bold text-slate-500 uppercase ml-1">Propaganda Image URL</p>
+                <input type="text" id="image-url" placeholder="https://example.com/image.jpg" class="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-sm outline-none focus:border-blue-500 transition-all">
             </div>
-            <button onclick="processPurchase()" class="btn-primary w-full py-5 rounded-2xl font-black text-sm uppercase tracking-[0.2em]">
-                Confirm Occupation
+            <button id="pay-button" onclick="initiatePayment()" class="w-full bg-blue-600 hover:bg-blue-500 py-6 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-blue-600/30 transition-all">
+                SECURE CHECKOUT & CONQUER
             </button>
+            <p class="text-[9px] text-center text-slate-500 italic uppercase">Payments secured by Stripe</p>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Init Map with single world view
-        const map = L.map('map', {
-            zoomControl: false,
-            minZoom: 2.4,
-            maxZoom: 5,
-            worldCopyJump: false,
-            maxBounds: [[-85, -180], [85, 180]],
-            maxBoundsViscosity: 1.0
-        }).setView([20, 0], 2.5);
+        const stripe = Stripe('pk_test_...'); // Ta clé publique
+        const map = L.map('map', { zoomControl: false, minZoom: 2.5, maxZoom: 5, worldCopyJump: false, 
+            maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1.0 }).setView([20, 0], 2.5);
 
         let countriesDB = {};
-        let selectedISO = null;
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-            noWrap: true
-        }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
 
-        // Pattern system with better scaling
         function createPattern(id, url) {
             let svg = document.querySelector('svg');
-            if(!svg) return;
             let defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS("http://www.w3.org/2000/svg", "defs"), svg.firstChild);
-            
             let pattern = document.getElementById('pat-'+id);
             if(!pattern) {
                 pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
-                pattern.setAttribute('id', 'pat-'+id);
-                pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-                pattern.setAttribute('width', '250');
-                pattern.setAttribute('height', '250');
+                pattern.setAttribute('id', 'pat-'+id); pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+                pattern.setAttribute('width', '250'); pattern.setAttribute('height', '250');
                 const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
-                img.setAttribute('width', '250');
-                img.setAttribute('height', '250');
+                img.setAttribute('width', '250'); img.setAttribute('height', '250');
                 img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-                pattern.appendChild(img);
-                defs.appendChild(pattern);
+                pattern.appendChild(img); defs.appendChild(pattern);
             }
             pattern.querySelector('image').setAttribute('href', url);
         }
 
-        async function init() {
-            const [geoRes, dbRes] = await Promise.all([
-                fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson'),
-                fetch('/api/countries')
+        async function load() {
+            const [g, d] = await Promise.all([
+                fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
+                fetch('/api/countries').then(r => r.json())
             ]);
-            const geoData = await geoRes.json();
-            countriesDB = await dbRes.json();
-
-            L.geoJSON(geoData, {
+            countriesDB = d;
+            L.geoJSON(g, {
                 style: (f) => {
                     const iso = f.properties.iso_a3;
-                    if(countriesDB[iso] && countriesDB[iso].image_url) {
+                    if(countriesDB[iso]) {
                         createPattern(iso, countriesDB[iso].image_url);
-                        return { fillOpacity: 1, fillColor: `url(#pat-${iso})`, color: '#3b82f6', weight: 0.8 };
+                        return { fillOpacity: 1, fillColor: `url(#pat-${iso})`, color: '#3b82f6', weight: 1.5, className: 'occupied-glow' };
                     }
-                    return { fillOpacity: 1, fillColor: '#0f172a', color: '#1e293b', weight: 0.8 };
+                    return { fillOpacity: 1, fillColor: '#05070a', color: '#1a1f26', weight: 1 };
                 },
                 onEachFeature: (f, layer) => {
-                    layer.on('mouseover', () => layer.setStyle({ weight: 2, color: '#3b82f6' }));
-                    layer.on('mouseout', () => layer.setStyle({ weight: 0.8, color: countriesDB[f.properties.iso_a3] ? '#3b82f6' : '#1e293b' }));
-                    layer.on('click', (e) => openPanel(f.properties));
+                    layer.on('click', (e) => {
+                        selectedISO = f.properties.iso_a3;
+                        const data = countriesDB[selectedISO];
+                        document.getElementById('country-name').innerText = f.properties.name;
+                        let minVal = data ? Math.max(1.00, data.price * 1.2).toFixed(2) : "1.00";
+                        document.getElementById('country-price').innerText = data ? data.price.toFixed(2) + " $" : "UNCLAIMED";
+                        document.getElementById('custom-price').value = minVal;
+                        document.getElementById('buy-panel').classList.remove('opacity-0', 'translate-y-32', 'pointer-events-none');
+                        L.DomEvent.stopPropagation(e);
+                    });
                 }
             }).addTo(map);
-
             renderScoreboard();
         }
 
-        function openPanel(props) {
-            selectedISO = props.iso_a3;
-            const data = countriesDB[selectedISO] || {price: 1.0};
-            document.getElementById('country-name').innerText = props.name;
-            document.getElementById('country-price').innerText = data.price.toFixed(2) + " $";
-            document.getElementById('custom-price').value = (data.price * 1.2).toFixed(2);
-            
-            const panel = document.getElementById('buy-panel');
-            panel.classList.remove('opacity-0', 'translate-y-20', 'pointer-events-none');
-        }
-
-        function closePanel() {
-            const panel = document.getElementById('buy-panel');
-            panel.classList.add('opacity-0', 'translate-y-20', 'pointer-events-none');
-        }
-
         function renderScoreboard() {
-            const container = document.getElementById('scoreboard');
-            const sorted = Object.entries(countriesDB).sort((a,b) => b[1].price - a[1].price).slice(0, 8);
-            
-            container.innerHTML = sorted.map(([iso, data]) => `
-                <div class="flex items-center justify-between p-4 hover:bg-white/5 rounded-2xl transition-all cursor-default group">
+            const sorted = Object.entries(countriesDB).sort((a,b) => b[1].price - a[1].price).slice(0, 7);
+            document.getElementById('scoreboard').innerHTML = sorted.map(([iso, data]) => `
+                <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-cover bg-center border border-white/10" style="background-image: url('${data.image_url}')"></div>
-                        <span class="font-black text-xs tracking-tighter uppercase text-slate-300">${iso}</span>
+                        <div class="w-10 h-10 rounded-xl bg-cover border border-white/10" style="background-image: url('${data.image_url}')"></div>
+                        <span class="text-xs font-bold uppercase tracking-tighter text-slate-400">${iso}</span>
                     </div>
-                    <span class="font-mono text-blue-500 font-bold">$${data.price.toFixed(0)}</span>
+                    <span class="font-bold text-blue-500 text-sm">$${Math.floor(data.price)}</span>
                 </div>
-            `).join('') || '<div class="p-8 text-center text-slate-600 text-xs uppercase font-bold tracking-widest">No Occupations Yet</div>';
+            `).join('') || '<p class="text-center text-slate-600 text-[10px]">MAP IS AVAILABLE</p>';
         }
 
-        async function processPurchase() {
-            const bid = document.getElementById('custom-price').value;
+        async function initiatePayment() {
+            const btn = document.getElementById('pay-button');
+            const price = document.getElementById('custom-price').value;
             const img = document.getElementById('image-url').value;
+
+            if(!img) return alert("Please provide a propaganda image URL.");
             
-            const res = await fetch('/buy-country', {
+            btn.innerText = "INITIALIZING STRIPE...";
+            btn.disabled = true;
+
+            const res = await fetch('/create-checkout-session', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({code: selectedISO, price: bid, image_url: img})
+                body: JSON.stringify({ code: selectedISO, price: price, image_url: img })
             });
-            const result = await res.json();
-            if(result.success) location.reload();
-            else alert(result.error);
+            const session = await res.json();
+            if(session.id) {
+                stripe.redirectToCheckout({ sessionId: session.id });
+            } else {
+                alert(session.error);
+                btn.innerText = "SECURE CHECKOUT & CONQUER";
+                btn.disabled = false;
+            }
         }
 
-        init();
+        function closePanel() { document.getElementById('buy-panel').classList.add('opacity-0', 'translate-y-32', 'pointer-events-none'); }
+        map.on('click', closePanel);
+        load();
     </script>
 </body>
 </html>
