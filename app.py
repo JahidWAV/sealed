@@ -1,7 +1,7 @@
 import os
 import json
 import stripe
-from flask import Flask, render_template, request, jsonify, redirect
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
@@ -10,11 +10,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'conquest_2026_key')
 
 # --- CONFIG STRIPE ---
-# Assure-toi que la clé secrète (sk_test...) est dans tes variables d'environnement Render
+# Assure-toi que sk_test_... est bien dans les variables d'environnement sur Render
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
-
-# METS TON URL RENDER ICI (SANS LE / À LA FIN)
-DOMAIN = "https://ton-application.onrender.com" 
 
 # --- CONFIG FIREBASE ---
 firebase_config_json = os.environ.get('FIREBASE_CONFIG')
@@ -46,7 +43,11 @@ def create_checkout_session():
         iso_code = data.get('code')
         proposed_price = round(float(data.get('price', 0)), 2)
 
-        # Vérification prix minimum (1.00$ ou +20%)
+        # Détection dynamique du domaine (évite les erreurs de mismatch Stripe)
+        # request.host_url renvoie "https://ton-site.onrender.com/"
+        base_url = request.host_url.rstrip('/')
+
+        # Vérification prix minimum
         doc = db.collection('territories').document(iso_code).get()
         min_allowed = 1.00
         if doc.exists:
@@ -55,7 +56,7 @@ def create_checkout_session():
         if proposed_price < min_allowed:
             return jsonify(error=f"Price too low. Min: {min_allowed}$"), 400
 
-        # Création de la session Stripe
+        # Création de la session
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -63,18 +64,20 @@ def create_checkout_session():
                     'currency': 'usd',
                     'product_data': {
                         'name': f"CONQUEST: {iso_code}",
+                        'description': "Claiming territory on The Dollar Map",
                     },
                     'unit_amount': int(proposed_price * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=DOMAIN + f"/success?code={iso_code}&price={proposed_price}",
-            cancel_url=DOMAIN + "/",
+            # On utilise base_url détecté dynamiquement
+            success_url=f"{base_url}/success?code={iso_code}&price={proposed_price}",
+            cancel_url=f"{base_url}/",
         )
         return jsonify({'id': checkout_session.id})
     except Exception as e:
-        print(f"STRIPE ERROR: {e}")
+        print(f"DEBUG STRIPE ERROR: {str(e)}")
         return jsonify(error=str(e)), 500
 
 @app.route('/success')
@@ -86,7 +89,7 @@ def success():
             'price': float(price),
             'last_update': datetime.utcnow()
         })
-    return redirect("/")
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
