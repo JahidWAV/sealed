@@ -7,11 +7,11 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'conquest_direct_v1')
+app.secret_key = os.environ.get('SECRET_KEY', 'conquest_2026_key')
 
 # --- CONFIG STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', 'sk_test_...') # Ta clé secrète
-DOMAIN = "https://votre-domaine.onrender.com" # Ton domaine Render
+DOMAIN = "https://votre-domaine.onrender.com"
 
 # --- CONFIG FIREBASE ---
 firebase_config_json = os.environ.get('FIREBASE_CONFIG')
@@ -38,13 +38,10 @@ def get_countries():
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
-    """Crée une session Stripe pour un paiement direct sans solde préalable"""
     data = request.json
     iso_code = data.get('code')
     proposed_price = round(float(data.get('price', 0)), 2)
-    image_url = data.get('image_url')
 
-    # Sécurité backend sur le prix
     doc = db.collection('territories').document(iso_code).get()
     min_allowed = 1.00
     if doc.exists:
@@ -61,21 +58,14 @@ def create_checkout_session():
                     'currency': 'usd',
                     'product_data': {
                         'name': f"CONQUEST: {iso_code}",
-                        'description': f"Territory domination with custom image",
-                        'images': [image_url] if image_url.startswith('http') else [],
+                        'description': f"Direct territory acquisition",
                     },
                     'unit_amount': int(proposed_price * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            # On stocke les infos dans metadata pour les retrouver après le paiement
-            metadata={
-                'iso_code': iso_code,
-                'price': proposed_price,
-                'image_url': image_url
-            },
-            success_url=DOMAIN + f"/success?code={iso_code}&price={proposed_price}&img={image_url}",
+            success_url=DOMAIN + f"/success?code={iso_code}&price={proposed_price}",
             cancel_url=DOMAIN + "/",
         )
         return jsonify({'id': checkout_session.id})
@@ -84,15 +74,12 @@ def create_checkout_session():
 
 @app.route('/success')
 def success():
-    """Route de retour après paiement Stripe réussi"""
     iso_code = request.args.get('code')
     price = request.args.get('price')
-    image_url = request.args.get('img')
 
-    if iso_code and price and image_url:
+    if iso_code and price:
         db.collection('territories').document(iso_code).set({
             'price': float(price),
-            'image_url': image_url,
             'last_update': datetime.utcnow()
         })
     return redirect("/")
