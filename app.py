@@ -1,123 +1,155 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <title>Sealed - Dashboard</title>
-</head>
-<body class="bg-gray-900 text-white min-h-screen font-sans">
+import os
+import hashlib
+import ecdsa
+import firebase_admin
+import json
+import stripe
+from firebase_admin import credentials, firestore
+from flask import Flask, render_template, request, redirect, session, url_for, flash, jsonify
+from flask_bcrypt import Bcrypt
+from datetime import datetime
 
-    <div class="max-w-6xl mx-auto px-4 py-8">
-        <nav class="flex justify-between items-center mb-10 bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-xl">
-            <div class="flex items-center gap-2">
-                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center font-black italic">S</div>
-                <h1 class="text-xl font-black tracking-tighter uppercase">Sealed<span class="text-blue-500">.</span></h1>
-            </div>
-            <div class="flex items-center gap-6">
-                <div class="text-right">
-                    <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">Utilisateur</p>
-                    <p class="text-sm font-bold text-blue-400">{{ user.username }}</p>
-                </div>
-                <a href="/logout" class="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-4 py-2 rounded-xl text-xs font-black transition">LOGOUT</a>
-            </div>
-        </nav>
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'sealed_master_2026')
+bcrypt = Bcrypt(app)
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="mb-6 p-4 rounded-xl text-sm font-bold text-center border {% if category == 'danger' %}bg-red-500/10 text-red-400 border-red-500/50{% else %}bg-green-500/10 text-green-400 border-green-500/50{% endif %}">
-                {{ message }}
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
+# --- CONFIG STRIPE ---
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
+endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            <div class="lg:col-span-2 space-y-8">
-                <div class="bg-gradient-to-br from-blue-700 to-blue-900 p-8 rounded-3xl shadow-2xl relative overflow-hidden border border-blue-400/20">
-                    <div class="relative z-10">
-                        <p class="text-blue-200 text-xs font-black uppercase tracking-widest mb-2">Solde Actuel</p>
-                        <h2 class="text-6xl font-black tracking-tighter mb-8">{{ "%.2f"|format(user.balance) }} €</h2>
-                        <div class="bg-black/30 backdrop-blur-md p-4 rounded-2xl border border-white/10">
-                            <p class="text-[10px] text-blue-300 font-black uppercase mb-1">Adresse Publique</p>
-                            <code class="text-xs font-mono text-white break-all">{{ user.wallet_address }}</code>
-                        </div>
-                    </div>
-                </div>
+# --- CONFIG FIREBASE ---
+if not firebase_admin._apps:
+    fb_config = os.environ.get('FIREBASE_CONFIG')
+    if fb_config:
+        cred = credentials.Certificate(json.loads(fb_config))
+        firebase_admin.initialize_app(cred)
+db = firestore.client()
 
-                <div class="bg-gray-800 rounded-3xl border border-gray-700 overflow-hidden">
-                    <div class="p-6 border-b border-gray-700 font-black text-xs uppercase tracking-widest text-gray-400">Derniers Mouvements</div>
-                    <div class="divide-y divide-gray-700">
-                        {% for tx in transactions %}
-                        <div class="p-4 flex justify-between items-center hover:bg-gray-700/20">
-                            <div>
-                                <p class="text-[10px] text-gray-500 font-bold">{{ tx.timestamp.strftime('%d/%m %H:%M') }}</p>
-                                <p class="text-sm font-mono text-blue-300 truncate w-40 sm:w-64">{{ tx.recipient_addr }}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-lg font-black text-white">-{{ "%.2f"|format(tx.amount) }} €</p>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
+# --- WEBHOOK ---
 
-            <div class="space-y-6">
-                <div class="bg-gray-800 p-6 rounded-3xl border-t-4 border-t-green-500 shadow-xl">
-                    <h3 class="text-lg font-black mb-4 text-green-500">💳 DÉPOSER</h3>
-                    <form action="/create-checkout-session" method="POST" class="space-y-4">
-                        <input type="number" step="0.01" name="amount" id="dep_amt" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-green-500" required>
-                        
-                        <div class="bg-black/20 p-3 rounded-xl text-[11px] font-bold space-y-1">
-                            <div class="flex justify-between">
-                                <span class="text-gray-500 italic">Frais (1.2% + 0.25€)</span>
-                                <span id="fee_val" class="text-red-400">0.00 €</span>
-                            </div>
-                            <div class="flex justify-between border-t border-white/5 pt-1 font-black">
-                                <span class="text-gray-400">Net Crédité</span>
-                                <span id="net_val" class="text-green-400">0.00 €</span>
-                            </div>
-                        </div>
-                        <button type="submit" class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Payer</button>
-                    </form>
-                </div>
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
 
-                <div class="bg-gray-800 p-6 rounded-3xl border border-gray-700">
-                    <h3 class="text-lg font-black mb-4 text-blue-500 font-black italic">💸 ENVOYER</h3>
-                    <form action="/send" method="POST" class="space-y-4">
-                        <input type="text" name="recipient_address" placeholder="0x..." class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-mono text-xs focus:border-blue-500" required>
-                        <input type="number" step="0.01" name="amount" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-blue-500" required>
-                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Transférer</button>
-                    </form>
-                </div>
+    try:
+        # Validation officielle de la signature
+        stripe_event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        # Conversion forcée en dictionnaire pur pour Python 3.14
+        event = json.loads(json.dumps(stripe_event.to_dict_recursive()))
+    except Exception as e:
+        print(f"❌ Erreur Webhook : {e}")
+        return jsonify(success=False), 400
 
-                <div class="bg-gray-800 p-6 rounded-3xl border-t-4 border-t-orange-500 shadow-xl">
-                    <h3 class="text-lg font-black mb-4 text-orange-500">🏦 RETIRER</h3>
-                    <form action="/withdraw" method="POST" class="space-y-4">
-                        <input type="text" name="iban" placeholder="IBAN (FR76...)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-mono text-xs focus:border-orange-500" required>
-                        <input type="number" step="0.01" name="amount" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-orange-500" required>
-                        <button type="submit" class="w-full bg-orange-600 hover:bg-orange-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Virement</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
+    if event.get('type') == 'checkout.session.completed':
+        session_obj = event.get('data', {}).get('object', {})
+        session_id = session_obj.get('id')
+        username = session_obj.get('metadata', {}).get('username')
 
-    <script>
-        const input = document.getElementById('dep_amt');
-        const feeVal = document.getElementById('fee_val');
-        const netVal = document.getElementById('net_val');
+        if username:
+            try:
+                # Anti-doublon
+                existing = db.collection('transactions').where('stripe_session_id', '==', session_id).limit(1).get()
+                if len(existing) > 0:
+                    return jsonify(success=True), 200
 
-        input.addEventListener('input', () => {
-            const val = parseFloat(input.value) || 0;
-            const fee = val > 0 ? (val * 0.012) + 0.25 : 0;
-            const net = val - fee;
-            feeVal.innerText = fee.toFixed(2) + ' €';
-            netVal.innerText = (net > 0 ? net.toFixed(2) : '0.00') + ' €';
-        });
-    </script>
-</body>
-</html>
+                # Calcul montant net
+                amount_total = session_obj.get('amount_total', 0)
+                net_amount = round((amount_total / 100) * 0.982 - 0.25, 2) # Frais Stripe Card approx
+
+                user_ref = db.collection('users').document(username)
+                user_snap = user_ref.get()
+
+                if user_snap.exists:
+                    user_data = user_snap.to_dict()
+                    new_bal = round(float(user_data.get('balance', 0) or 0) + net_amount, 2)
+                    
+                    batch = db.batch()
+                    batch.update(user_ref, {'balance': new_bal})
+                    batch.set(db.collection('transactions').document(), {
+                        'sender_un': 'STRIPE_SYSTEM',
+                        'recipient_addr': user_data.get('wallet_address'),
+                        'amount': net_amount,
+                        'type': 'deposit',
+                        'stripe_session_id': session_id,
+                        'timestamp': datetime.utcnow()
+                    })
+                    batch.commit()
+                    print(f"✅ COMPTE CRÉDITÉ : {username} (+{net_amount}€)")
+            except Exception as e:
+                print(f"❌ Erreur DB : {e}")
+                return jsonify(success=False), 500
+
+    return jsonify(success=True), 200
+
+# --- ROUTES DASHBOARD ---
+
+@app.route('/create-checkout-session', methods=['POST'])
+def create_checkout_session():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    try:
+        amount = float(request.form.get('amount'))
+        username = session['user_id']
+        
+        # On crée une session simple par carte
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'eur',
+                    'product_data': {'name': 'Crédits Sealed'},
+                    'unit_amount': int(amount * 100),
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=url_for('dashboard', _external=True) + "?status=success",
+            cancel_url=url_for('dashboard', _external=True),
+            metadata={'username': username}
+        )
+        return redirect(checkout_session.url, code=303)
+    except Exception as e:
+        flash(f"Erreur : {e}", "danger")
+        return redirect(url_for('dashboard'))
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    user_doc = db.collection('users').document(session['user_id']).get()
+    user_data = user_doc.to_dict()
+    tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
+    return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
+
+# --- AUTH ---
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        un = request.form.get('username').lower().strip()
+        if db.collection('users').document(un).get().exists:
+            flash("Pseudo déjà pris.", "danger"); return redirect(url_for('register'))
+        hashed = bcrypt.generate_password_hash(request.form.get('password')).decode('utf-8')
+        sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
+        addr = f"0x{hashlib.sha256(sk.get_verifying_key().to_string()).hexdigest()[:40]}"
+        db.collection('users').document(un).set({'username': un, 'password': hashed, 'wallet_address': addr, 'private_key': sk.to_string().hex(), 'balance': 0.0, 'created_at': datetime.utcnow()})
+        return redirect(url_for('login'))
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        un = request.form.get('username').lower().strip()
+        doc = db.collection('users').document(un).get()
+        if doc.exists and bcrypt.check_password_hash(doc.to_dict()['password'], request.form.get('password')):
+            session['user_id'] = un; return redirect(url_for('dashboard'))
+        flash("Identifiants invalides.", "danger")
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout(): session.clear(); return redirect(url_for('login'))
+
+@app.route('/')
+def home(): return redirect(url_for('dashboard')) if 'user_id' in session else redirect(url_for('login'))
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
