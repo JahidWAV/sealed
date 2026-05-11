@@ -26,14 +26,14 @@ else:
     if fb_config_env:
         cred = credentials.Certificate(json.loads(fb_config_env))
     else:
-        print("ERREUR : Variable FIREBASE_CONFIG manquante sur Render")
+        print("ERREUR : Variable FIREBASE_CONFIG manquante")
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-# --- LOGIQUE DE DÉPÔT (STRIPE) ---
+# --- LOGIQUE DE DÉPÔT (STRIPE AVEC SOLUTION A) ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -51,7 +51,7 @@ def create_checkout_session():
             line_items=[{
                 'price_data': {
                     'currency': 'eur',
-                    'product_data': {'name': 'Dépôt Sealed'},
+                    'product_data': {'name': 'Dépôt Sealed (Frais déduits au crédit)'},
                     'unit_amount': amount_in_cents,
                 },
                 'quantity': 1,
@@ -73,67 +73,60 @@ def payment_success():
     try:
         stripe_session = stripe.checkout.Session.retrieve(session_id)
         if stripe_session.payment_status == 'paid':
-            amount_paid = stripe_session.amount_total / 100
+            gross_amount = stripe_session.amount_total / 100
+            
+            # CALCUL DES FRAIS RÉELS (Solution A)
+            fees = (gross_amount * 0.012) + 0.25
+            net_amount = round(gross_amount - fees, 2)
+            
             username = stripe_session.metadata['username']
             user_ref = db.collection('users').document(username)
             user_doc = user_ref.get()
+            
             if user_doc.exists:
-                new_balance = user_doc.to_dict().get('balance', 0.0) + amount_paid
+                new_balance = user_doc.to_dict().get('balance', 0.0) + net_amount
                 user_ref.update({'balance': new_balance})
                 
-                # Log Ledger
                 db.collection('transactions').document().set({
                     'sender_un': 'STRIPE_SYSTEM',
                     'recipient_addr': user_doc.to_dict()['wallet_address'],
-                    'amount': amount_paid,
+                    'amount': net_amount,
+                    'fees_deducted': round(fees, 2),
                     'timestamp': datetime.utcnow(),
                     'type': 'deposit'
                 })
-                flash(f"Compte crédité de {amount_paid}€ !", "success")
+                flash(f"Compte crédité de {net_amount}€ (Frais de {round(fees, 2)}€ déduits).", "success")
         return redirect(url_for('dashboard'))
     except Exception as e:
         return redirect(url_for('dashboard'))
 
-# --- LOGIQUE DE RETRAIT (WITHDRAW) ---
+# --- LOGIQUE DE RETRAIT & TRANSFERT ---
 
 @app.route('/withdraw', methods=['POST'])
 def withdraw():
     if 'user_id' not in session: return redirect(url_for('login'))
-    
     try:
         amount = float(request.form.get('amount'))
         iban = request.form.get('iban').strip().upper()
-        
-        if amount <= 0: raise ValueError
-        
         user_ref = db.collection('users').document(session['user_id'])
         user_data = user_ref.get().to_dict()
 
         if user_data['balance'] < amount:
-            flash("Solde insuffisant pour ce retrait.", "danger")
+            flash("Solde insuffisant.", "danger")
             return redirect(url_for('dashboard'))
 
-        # Débit immédiat du solde réel
-        new_balance = user_data['balance'] - amount
-        user_ref.update({'balance': new_balance})
-
-        # Enregistrement de la demande de virement
+        user_ref.update({'balance': user_data['balance'] - amount})
         db.collection('transactions').document().set({
             'sender_un': session['user_id'],
-            'recipient_addr': f"RETRAIT IBAN: {iban[:4]}...",
+            'recipient_addr': f"RETRAIT: {iban[:6]}...",
             'amount': amount,
             'timestamp': datetime.utcnow(),
-            'status': 'pending_withdrawal',
             'type': 'withdraw'
         })
-
-        flash(f"Demande de retrait de {amount}€ validée. Virement en cours vers {iban[:4]}...", "success")
+        flash(f"Retrait de {amount}€ enregistré.", "success")
     except:
-        flash("Erreur lors de la demande de retrait.", "danger")
-        
+        flash("Erreur de retrait.", "danger")
     return redirect(url_for('dashboard'))
-
-# --- LOGIQUE DE TRANSFERT ---
 
 @app.route('/send', methods=['POST'])
 def send_money():
@@ -142,8 +135,6 @@ def send_money():
     recipient_addr = request.form.get('recipient_address').strip()
     try:
         amount = float(request.form.get('amount'))
-        if amount <= 0: raise ValueError
-        
         sender_ref = db.collection('users').document(sender_un)
         sender_data = sender_ref.get().to_dict()
 
@@ -157,26 +148,20 @@ def send_money():
             return redirect(url_for('dashboard'))
 
         recipient_ref = recipient_query[0].reference
-        recipient_data = recipient_query[0].to_dict()
-
         batch = db.batch()
         batch.update(sender_ref, {'balance': sender_data['balance'] - amount})
-        batch.update(recipient_ref, {'balance': recipient_data['balance'] + amount})
-        tx_ref = db.collection('transactions').document()
-        batch.set(tx_ref, {
-            'sender_un': sender_un,
-            'recipient_addr': recipient_addr,
-            'amount': amount,
-            'timestamp': datetime.utcnow(),
-            'type': 'transfer'
+        batch.update(recipient_ref, {'balance': recipient_query[0].to_dict()['balance'] + amount})
+        batch.set(db.collection('transactions').document(), {
+            'sender_un': sender_un, 'recipient_addr': recipient_addr,
+            'amount': amount, 'timestamp': datetime.utcnow(), 'type': 'transfer'
         })
         batch.commit()
-        flash(f"Transfert de {amount}€ réussi.", "success")
+        flash("Transfert réussi.", "success")
     except:
-        flash("Données invalides.", "danger")
+        flash("Erreur transfert.", "danger")
     return redirect(url_for('dashboard'))
 
-# --- AUTH & DASHBOARD ---
+# --- AUTH & BASE ---
 
 @app.route('/')
 def index():
@@ -189,7 +174,7 @@ def register():
         password = request.form.get('password')
         user_ref = db.collection('users').document(username)
         if user_ref.get().exists:
-            flash('Pseudo déjà pris.', 'danger')
+            flash('Pseudo pris.', 'danger')
             return redirect(url_for('register'))
         
         hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -212,17 +197,15 @@ def login():
         if user_doc.exists and bcrypt.check_password_hash(user_doc.to_dict()['password'], password):
             session['user_id'] = username
             return redirect(url_for('dashboard'))
-        flash('Erreur de connexion.', 'danger')
+        flash('Identifiants invalides.', 'danger')
     return render_template('login.html')
 
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
     user_data = db.collection('users').document(session['user_id']).get().to_dict()
-    # On récupère toutes les transactions liées (envoyées)
-    tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(15).get()
-    transactions = [t.to_dict() for t in tx_docs]
-    return render_template('dashboard.html', user=user_data, transactions=transactions)
+    tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
+    return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
 @app.route('/logout')
 def logout():
