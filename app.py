@@ -20,11 +20,12 @@ endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET')
 # --- FIREBASE ---
 if not firebase_admin._apps:
     fb_config = os.environ.get('FIREBASE_CONFIG')
-    cred = credentials.Certificate(json.loads(fb_config))
-    firebase_admin.initialize_app(cred)
+    if fb_config:
+        cred = credentials.Certificate(json.loads(fb_config))
+        firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK (LA SOURCE DU CRASH 500) ---
+# --- WEBHOOK (CORRECTION FINALE 500) ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -37,62 +38,76 @@ def webhook():
         print(f"⚠️ Erreur Signature : {e}")
         return jsonify(success=False), 400
 
-    if event['type'] in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
-        session_obj = event['data']['object']
+    # Liste des événements de succès
+    valid_events = ['checkout.session.completed', 'checkout.session.async_payment_succeeded']
+    
+    if event.get('type') in valid_events:
+        # On récupère l'objet de session de manière ultra-sécurisée
+        session_obj = event.get('data', {}).get('object', {})
         
-        # Récupération sécurisée du username
+        # 1. Extraction du Username (Metadata)
         metadata = session_obj.get('metadata', {})
         username = metadata.get('username')
         
+        # 2. Backup : Recherche par Customer ID si metadata vide
         if not username:
             customer_id = session_obj.get('customer')
+            print(f"🔍 Metadata vide. Recherche via Customer ID : {customer_id}")
             user_query = db.collection('users').where('stripe_customer_id', '==', customer_id).limit(1).get()
             if user_query:
                 username = user_query[0].id
             else:
-                return jsonify(success=False), 200
+                print("❌ Utilisateur introuvable en DB.")
+                return jsonify(success=True), 200 # On renvoie 200 pour éviter que Stripe boucle
 
-        # Calcul du montant net
-        gross_amount = session_obj['amount_total'] / 100
+        # 3. Calcul financier sécurisé
+        amount_total = session_obj.get('amount_total', 0)
+        gross_amount = amount_total / 100
         fees = (gross_amount * 0.012) + 0.25
         net_amount = round(gross_amount - fees, 2)
 
-        # MISE À JOUR FIREBASE (Version ultra-stable)
+        if net_amount <= 0:
+            return jsonify(success=True), 200
+
+        # 4. Mise à jour Firebase
         try:
             user_ref = db.collection('users').document(username)
             
             @firestore.transactional
-            def update_in_transaction(transaction, user_ref, amount):
+            def update_balance_safe(transaction, user_ref, amount):
                 snapshot = user_ref.get(transaction=transaction)
                 if not snapshot.exists:
                     return False
                 
-                # Calcul nouveau solde
-                new_bal = round((snapshot.get('balance') or 0.0) + amount, 2)
+                # Récupération sécurisée du solde actuel
+                user_dict = snapshot.to_dict()
+                current_bal = user_dict.get('balance', 0.0)
+                if current_bal is None: current_bal = 0.0
+                
+                new_bal = round(float(current_bal) + amount, 2)
                 transaction.update(user_ref, {'balance': new_bal})
                 
-                # Création du log de transaction
+                # Création du log
                 tx_ref = db.collection('transactions').document()
                 transaction.set(tx_ref, {
                     'sender_un': 'STRIPE_SYSTEM',
-                    'recipient_addr': snapshot.get('wallet_address'),
+                    'recipient_addr': user_dict.get('wallet_address', 'Unknown'),
                     'amount': amount,
                     'type': 'deposit',
                     'timestamp': datetime.utcnow()
                 })
                 return True
 
-            transaction = db.transaction()
-            success = update_in_transaction(transaction, user_ref, net_amount)
+            success = update_balance_safe(db.transaction(), user_ref, net_amount)
             if success:
-                print(f"✅ SUCCÈS : {username} crédité de {net_amount}€")
+                print(f"✅ CRÉDIT EFFECTUÉ : {username} (+{net_amount}€)")
         except Exception as e:
-            print(f"❌ ERREUR TRANSACTION : {e}")
+            print(f"❌ CRASH DURANT TRANSACTION : {e}")
             return jsonify(success=False), 500
 
-    return jsonify(success=True)
+    return jsonify(success=True), 200
 
-# --- ROUTES DE PAIEMENT ---
+# --- ROUTES DASHBOARD / SEND / WITHDRAW (SANS CHANGEMENT) ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -129,8 +144,6 @@ def create_checkout_session():
         flash(f"Erreur : {e}", "danger")
         return redirect(url_for('dashboard'))
 
-# --- LOGIQUE CORE ---
-
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -151,15 +164,15 @@ def send_money():
             return redirect(url_for('dashboard'))
         rec_query = db.collection('users').where('wallet_address', '==', recipient_addr).limit(1).get()
         if not rec_query:
-            flash("Inconnu.", "danger")
+            flash("Destinataire inconnu.", "danger")
             return redirect(url_for('dashboard'))
         batch = db.batch()
         batch.update(sender_ref, {'balance': sender_data['balance'] - amount})
         batch.update(rec_query[0].reference, {'balance': rec_query[0].to_dict()['balance'] + amount})
         batch.set(db.collection('transactions').document(), {'sender_un': session['user_id'], 'recipient_addr': recipient_addr, 'amount': amount, 'timestamp': datetime.utcnow(), 'type': 'transfer'})
         batch.commit()
-        flash("Envoyé !", "success")
-    except: flash("Erreur.", "danger")
+        flash("Argent envoyé !", "success")
+    except: flash("Erreur transfert.", "danger")
     return redirect(url_for('dashboard'))
 
 @app.route('/withdraw', methods=['POST'])
@@ -175,7 +188,7 @@ def withdraw():
             user_ref.update({'balance': bal - amount})
             db.collection('transactions').document().set({'sender_un': session['user_id'], 'recipient_addr': f"Virement: {iban[:4]}...", 'amount': amount, 'timestamp': datetime.utcnow(), 'type': 'withdraw'})
             flash("Demande envoyée.", "success")
-    except: flash("Erreur.", "danger")
+    except: flash("Erreur retrait.", "danger")
     return redirect(url_for('dashboard'))
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -183,7 +196,7 @@ def register():
     if request.method == 'POST':
         un = request.form.get('username').lower().strip()
         if db.collection('users').document(un).get().exists:
-            flash("Pris.", "danger"); return redirect(url_for('register'))
+            flash("Pseudo pris.", "danger"); return redirect(url_for('register'))
         hashed = bcrypt.generate_password_hash(request.form.get('password')).decode('utf-8')
         sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
         addr = f"0x{hashlib.sha256(sk.get_verifying_key().to_string()).hexdigest()[:40]}"
@@ -198,7 +211,7 @@ def login():
         doc = db.collection('users').document(un).get()
         if doc.exists and bcrypt.check_password_hash(doc.to_dict()['password'], request.form.get('password')):
             session['user_id'] = un; return redirect(url_for('dashboard'))
-        flash("Erreur login.", "danger")
+        flash("Identifiants incorrects.", "danger")
     return render_template('login.html')
 
 @app.route('/logout')
