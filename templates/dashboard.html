@@ -1,43 +1,117 @@
-<!-- Dans la section Actions de ton dashboard.html -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
-    
-    <!-- FORMULAIRE D'ENVOI REEL -->
-    <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
-        <h3 class="text-xl font-bold mb-6 flex items-center gap-2">
-            <span class="text-blue-500">●</span> Envoyer des fonds
-        </h3>
-        <form action="/send" method="POST" class="space-y-4">
-            <div>
-                <label class="text-xs text-gray-500 uppercase font-bold px-1">Adresse du destinataire</label>
-                <input type="text" name="recipient_address" placeholder="0x..." class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:border-blue-500 outline-none transition" required>
-            </div>
-            <div>
-                <label class="text-xs text-gray-500 uppercase font-bold px-1">Montant (€)</label>
-                <input type="number" step="0.01" name="amount" placeholder="0.00" class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:border-blue-500 outline-none transition" required>
-            </div>
-            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-black transition transform active:scale-95 shadow-lg">
-                CONFIRMER LE TRANSFERT
-            </button>
-        </form>
-    </div>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Sealed - Portefeuille Réel</title>
+</head>
+<body class="bg-gray-900 text-white min-h-screen font-sans">
 
-    <!-- HISTORIQUE DES TRANSACTIONS -->
-    <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
-        <h3 class="text-xl font-bold mb-6">Derniers mouvements</h3>
-        <div class="space-y-4 max-h-[300px] overflow-y-auto pr-2">
-            {% if transactions %}
-                {% for tx in transactions %}
-                <div class="flex justify-between items-center p-3 bg-gray-900/50 rounded-xl border border-gray-700">
-                    <div>
-                        <p class="text-xs text-gray-500">{{ tx.timestamp.strftime('%d/%m/%Y %H:%M') }}</p>
-                        <p class="text-sm font-mono text-gray-300">Vers: {{ tx.recipient_address[:10] }}...</p>
-                    </div>
-                    <span class="text-red-400 font-bold">- {{ "%.2f"|format(tx.amount) }} €</span>
+    <div class="max-w-5xl mx-auto px-4 py-8">
+        <nav class="flex justify-between items-center mb-10 bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-xl">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center font-black">S</div>
+                <h1 class="text-xl font-black tracking-tighter uppercase">Sealed<span class="text-blue-500">.</span></h1>
+            </div>
+            <div class="flex items-center gap-6">
+                <div class="text-right hidden sm:block">
+                    <p class="text-xs text-gray-500 font-bold uppercase tracking-widest">Utilisateur</p>
+                    <p class="text-sm font-bold text-blue-400">{{ user.username }}</p>
                 </div>
-                {% endfor %}
-            {% else %}
-                <p class="text-gray-600 text-center py-10">Aucune transaction effectuée.</p>
-            {% endif %}
+                <a href="/logout" class="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-4 py-2 rounded-xl text-xs font-black transition duration-200">DECONNEXION</a>
+            </div>
+        </nav>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="mb-6 p-4 rounded-xl text-sm font-bold text-center border {% if category == 'danger' %}bg-red-500/10 text-red-400 border-red-500/50{% else %}bg-green-500/10 text-green-400 border-green-500/50{% endif %}">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <div class="lg:col-span-2 space-y-8">
+                <div class="bg-gradient-to-br from-blue-700 to-blue-900 p-8 rounded-3xl shadow-2xl relative overflow-hidden border border-blue-400/20">
+                    <div class="relative z-10">
+                        <p class="text-blue-200 text-xs font-black uppercase tracking-[0.2em] mb-2">Solde Disponible</p>
+                        <h2 class="text-5xl md:text-7xl font-black tracking-tighter mb-8">{{ "%.2f"|format(user.balance) }} €</h2>
+                        
+                        <div class="bg-black/30 backdrop-blur-md p-4 rounded-2xl border border-white/10 inline-block w-full">
+                            <p class="text-[10px] text-blue-300 font-bold uppercase mb-1">Votre Adresse de Réception</p>
+                            <code class="text-xs md:text-sm font-mono text-white break-all">{{ user.wallet_address }}</code>
+                        </div>
+                    </div>
+                    <div class="absolute -right-10 -bottom-10 opacity-10">
+                        <svg width="200" height="200" fill="white" viewBox="0 0 24 24"><path d="M21 18l-3-3h-5l-2 2H3a1 1 0 00-1 1v4a1 1 0 001 1h18a1 1 0 001-1v-4a1 1 0 00-1-1zm-9 3H4v-2h7l1 1 1-1h7v2h-8zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 rounded-3xl border border-gray-700 overflow-hidden shadow-xl">
+                    <div class="p-6 border-b border-gray-700 bg-gray-800/50">
+                        <h3 class="font-black uppercase text-sm tracking-widest text-gray-400">Derniers Mouvements</h3>
+                    </div>
+                    <div class="p-0 max-h-[400px] overflow-y-auto">
+                        {% if transactions %}
+                            <table class="w-full text-left border-collapse">
+                                <tbody class="divide-y divide-gray-700">
+                                    {% for tx in transactions %}
+                                    <tr class="hover:bg-gray-700/30 transition">
+                                        <td class="p-4">
+                                            <p class="text-xs text-gray-500 font-bold">{{ tx.timestamp.strftime('%d %b, %H:%M') }}</p>
+                                            <p class="text-sm font-mono text-blue-300 truncate w-32 md:w-full">Vers: {{ tx.recipient_address }}</p>
+                                        </td>
+                                        <td class="p-4 text-right">
+                                            <span class="text-red-400 font-black text-lg">-{{ "%.2f"|format(tx.amount) }} €</span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <div class="p-10 text-center">
+                                <p class="text-gray-600 font-bold italic">Aucun transfert effectué pour le moment.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-8">
+                <div class="bg-gray-800 p-6 rounded-3xl border border-gray-700 shadow-xl">
+                    <h3 class="text-xl font-black mb-6 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                        TRANSFÉRER
+                    </h3>
+                    <form action="/send" method="POST" class="space-y-6">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase mb-2 ml-1">Adresse de destination</label>
+                            <input type="text" name="recipient_address" placeholder="0x..." class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition font-mono text-sm" required>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-500 uppercase mb-2 ml-1">Montant à envoyer (€)</label>
+                            <input type="number" step="0.01" name="amount" placeholder="0.00" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition font-bold text-xl" required>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-blue-900/20 transition transform active:scale-95">
+                            Valider l'envoi
+                        </button>
+                    </form>
+                </div>
+
+                <div class="bg-blue-900/10 p-6 rounded-3xl border border-blue-900/30">
+                    <p class="text-[10px] font-black text-blue-500 uppercase mb-2">Sécurité Blockchain</p>
+                    <p class="text-xs text-gray-400 leading-relaxed">
+                        Chaque transaction est signée avec votre clé privée et inscrite dans le registre Sealed. Assurez-vous de l'adresse du destinataire.
+                    </p>
+                </div>
+            </div>
+
         </div>
     </div>
-</div>
+
+</body>
+</html>
