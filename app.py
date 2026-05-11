@@ -25,7 +25,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK (CORRECTION FINALE 500) ---
+# --- WEBHOOK (CORRECTION FINALE ATTRIBUTEERROR) ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -33,43 +33,44 @@ def webhook():
     sig_header = request.headers.get('Stripe-Signature')
 
     try:
+        # On reconstruit l'événement
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except Exception as e:
         print(f"⚠️ Erreur Signature : {e}")
         return jsonify(success=False), 400
 
-    # Liste des événements de succès
-    valid_events = ['checkout.session.completed', 'checkout.session.async_payment_succeeded']
-    
-    if event.get('type') in valid_events:
-        # On récupère l'objet de session de manière ultra-sécurisée
-        session_obj = event.get('data', {}).get('object', {})
+    # ACCÈS SÉCURISÉ : On utilise event['type'] car event.get() crash
+    event_type = event['type']
+    print(f"📩 Webhook reçu : {event_type}")
+
+    if event_type in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
+        # On accède aux données via les clés du dictionnaire
+        session_obj = event['data']['object']
         
-        # 1. Extraction du Username (Metadata)
+        # Récupération sécurisée du username dans metadata
+        # On utilise .get() sur metadata car c'est un vrai dict Python
         metadata = session_obj.get('metadata', {})
         username = metadata.get('username')
         
-        # 2. Backup : Recherche par Customer ID si metadata vide
+        # Backup : Recherche par Customer ID
         if not username:
             customer_id = session_obj.get('customer')
             print(f"🔍 Metadata vide. Recherche via Customer ID : {customer_id}")
-            user_query = db.collection('users').where('stripe_customer_id', '==', customer_id).limit(1).get()
+            # Correction : Utilisation du mot-clé filter pour éviter le warning
+            user_query = db.collection('users').where(filter=firestore.FieldFilter('stripe_customer_id', '==', customer_id)).limit(1).get()
             if user_query:
                 username = user_query[0].id
             else:
-                print("❌ Utilisateur introuvable en DB.")
-                return jsonify(success=True), 200 # On renvoie 200 pour éviter que Stripe boucle
+                print("❌ Utilisateur introuvable.")
+                return jsonify(success=True), 200
 
-        # 3. Calcul financier sécurisé
+        # Calcul financier
         amount_total = session_obj.get('amount_total', 0)
         gross_amount = amount_total / 100
         fees = (gross_amount * 0.012) + 0.25
         net_amount = round(gross_amount - fees, 2)
 
-        if net_amount <= 0:
-            return jsonify(success=True), 200
-
-        # 4. Mise à jour Firebase
+        # Mise à jour Firestore
         try:
             user_ref = db.collection('users').document(username)
             
@@ -79,15 +80,12 @@ def webhook():
                 if not snapshot.exists:
                     return False
                 
-                # Récupération sécurisée du solde actuel
                 user_dict = snapshot.to_dict()
-                current_bal = user_dict.get('balance', 0.0)
-                if current_bal is None: current_bal = 0.0
+                current_bal = float(user_dict.get('balance', 0.0) or 0.0)
+                new_bal = round(current_bal + amount, 2)
                 
-                new_bal = round(float(current_bal) + amount, 2)
                 transaction.update(user_ref, {'balance': new_bal})
                 
-                # Création du log
                 tx_ref = db.collection('transactions').document()
                 transaction.set(tx_ref, {
                     'sender_un': 'STRIPE_SYSTEM',
@@ -102,12 +100,12 @@ def webhook():
             if success:
                 print(f"✅ CRÉDIT EFFECTUÉ : {username} (+{net_amount}€)")
         except Exception as e:
-            print(f"❌ CRASH DURANT TRANSACTION : {e}")
+            print(f"❌ ERREUR TRANSACTION : {e}")
             return jsonify(success=False), 500
 
     return jsonify(success=True), 200
 
-# --- ROUTES DASHBOARD / SEND / WITHDRAW (SANS CHANGEMENT) ---
+# --- AUTRES ROUTES ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -148,7 +146,7 @@ def create_checkout_session():
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
     user_data = db.collection('users').document(session['user_id']).get().to_dict()
-    tx_docs = db.collection('transactions').where('sender_un', '==', session['user_id']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
+    tx_docs = db.collection('transactions').where(filter=firestore.FieldFilter('sender_un', '==', session['user_id'])).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).get()
     return render_template('dashboard.html', user=user_data, transactions=[t.to_dict() for t in tx_docs])
 
 @app.route('/send', methods=['POST'])
@@ -162,7 +160,7 @@ def send_money():
         if sender_data['balance'] < amount:
             flash("Solde insuffisant.", "danger")
             return redirect(url_for('dashboard'))
-        rec_query = db.collection('users').where('wallet_address', '==', recipient_addr).limit(1).get()
+        rec_query = db.collection('users').where(filter=firestore.FieldFilter('wallet_address', '==', recipient_addr)).limit(1).get()
         if not rec_query:
             flash("Destinataire inconnu.", "danger")
             return redirect(url_for('dashboard'))
