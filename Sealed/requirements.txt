@@ -1,5 +1,0 @@
-flask
-flask_sqlalchemy
-flask_bcrypt
-ecdsa
-gunicorn
