@@ -2,18 +2,43 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.tailwindcss.com"></script>
-    <title>Créer mon Portefeuille</title>
+    <title>Sealed - Inscription</title>
 </head>
-<body class="bg-gray-900 text-white flex items-center justify-center h-screen">
-    <div class="bg-gray-800 p-10 rounded-2xl shadow-2xl w-96">
-        <h1 class="text-3xl font-bold mb-6 text-center text-blue-400">Inscription</h1>
-        <form method="POST">
-            <input type="text" name="username" placeholder="Nom d'utilisateur" class="w-full p-3 mb-4 rounded bg-gray-700 border-none focus:ring-2 focus:ring-blue-500" required>
-            <input type="password" name="password" placeholder="Mot de passe" class="w-full p-3 mb-6 rounded bg-gray-700 border-none focus:ring-2 focus:ring-blue-500" required>
-            <button type="submit" class="w-full bg-blue-600 py-3 rounded-lg font-bold hover:bg-blue-700 transition">Créer mon Wallet</button>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+    <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
+        <h2 class="text-3xl font-extrabold mb-2 text-blue-500 text-center">SEALED</h2>
+        <p class="text-gray-400 text-center mb-8">Créez votre portefeuille sécurisé</p>
+
+        <!-- Gestion des messages Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="mb-4 p-3 rounded-lg text-sm font-medium text-center {% if category == 'danger' %}bg-red-500/20 text-red-400 border border-red-500/50{% else %}bg-green-500/20 text-green-400 border border-green-500/50{% endif %}">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Nom d'utilisateur</label>
+                <input type="text" name="username" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-blue-500 focus:outline-none transition" placeholder="Ex: jahid_crypto" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Mot de passe</label>
+                <input type="password" name="password" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-blue-500 focus:outline-none transition" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg transform active:scale-95 transition duration-150">
+                Créer mon compte
+            </button>
         </form>
-        <p class="mt-4 text-center text-gray-400 text-sm">Déjà un compte ? <a href="/login" class="text-blue-400">Connexion</a></p>
+
+        <p class="mt-6 text-center text-gray-500 text-sm">
+            Déjà un compte ? <a href="/login" class="text-blue-400 hover:underline">Connectez-vous ici</a>
+        </p>
     </div>
 </body>
 </html>
