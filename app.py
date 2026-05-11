@@ -7,125 +7,85 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'SUPER_SECRET_KEY_THE_DOLLAR_MAP' # À changer en production
+app.secret_key = os.environ.get('SECRET_KEY', 'conquest_secret_777')
 
-# --- STRIPE CONFIG ---
-stripe.api_key = "sk_test_..." 
-
-# --- FIREBASE CONFIG (Render + Local) ---
+# --- CONFIGURATION FIREBASE ---
 firebase_config_json = os.environ.get('FIREBASE_CONFIG')
-
 if firebase_config_json:
-    cred_dict = json.loads(firebase_config_json)
-    cred = credentials.Certificate(cred_dict)
+    cred = credentials.Certificate(json.loads(firebase_config_json))
 else:
-    try:
-        cred = credentials.Certificate("serviceAccountKey.json")
-    except Exception as e:
-        print("Error: serviceAccountKey.json not found.")
-        cred = None
+    # Pour le dev local, assure-toi d'avoir ce fichier
+    cred = credentials.Certificate("serviceAccountKey.json")
 
-if cred:
-    # On évite d'initialiser deux fois si Flask reload
-    if not firebase_admin._apps:
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-
-# --- ROUTES ---
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 @app.route('/')
 def index():
-    # Simulation d'un utilisateur pour le test (à lier à ton système de login plus tard)
     if 'user_id' not in session:
-        session['user_id'] = 'test_user_1'
+        session['user_id'] = 'test_user_1' # Simule un utilisateur connecté
     return render_template('dashboard.html')
 
 @app.route('/api/countries')
 def get_countries():
-    """Récupère les données de la map pour le leaderboard et les visuels"""
     try:
         countries_ref = db.collection('territories').stream()
-        countries_data = {c.id: c.to_dict() for c in countries_ref}
-        return jsonify(countries_data)
+        return jsonify({c.id: c.to_dict() for c in countries_ref})
     except Exception as e:
         return jsonify(error=str(e)), 500
 
 @app.route('/buy-country', methods=['POST'])
 def buy_country():
-    """Gère l'achat d'un pays avec PRIX LIBRE (minimum +20%)"""
     if 'user_id' not in session:
-        return jsonify(error="Authentication required"), 401
+        return jsonify(error="Auth required"), 401
     
     data = request.json
-    iso_code = data.get('code') # ex: "USA"
-    proposed_price = float(data.get('price', 0)) # Le prix choisi par l'utilisateur
+    iso_code = data.get('code')
+    proposed_price = round(float(data.get('price', 0)), 2)
     new_image_url = data.get('image_url')
     user_id = session['user_id']
-    
-    if not iso_code or not new_image_url or proposed_price <= 0:
-        return jsonify(error="Missing data or invalid price"), 400
 
     user_ref = db.collection('users').document(user_id)
     country_ref = db.collection('territories').document(iso_code)
 
     @firestore.transactional
     def update_in_transaction(transaction, u_ref, c_ref):
-        u_snapshot = u_ref.get(transaction=transaction)
-        c_snapshot = c_ref.get(transaction=transaction)
+        u_snap = u_ref.get(transaction=transaction).to_dict()
+        c_snap = c_ref.get(transaction=transaction)
         
-        if not u_snapshot.exists:
-            raise Exception("User profile not found in database.")
-            
-        u_data = u_snapshot.to_dict()
-        
-        # Calcul du prix MINIMUM requis
-        current_price = 1.0
-        if c_snapshot.exists:
-            current_price = c_snapshot.to_dict().get('price', 1.0)
-        
-        min_allowed = round(current_price * 1.2, 2)
-        
-        # Vérification 1 : Le prix proposé est-il suffisant ?
-        if proposed_price < min_allowed:
-            raise Exception(f"Bid too low. Minimum required: {min_allowed}$")
+        # LOGIQUE DE PRIX LIBRE MAIS MINIMUM STRIPE (1.00$)
+        if c_snap.exists:
+            current_price = c_snap.to_dict().get('price', 0)
+            # Minimum = le plus élevé entre 1.00$ et l'ancienne offre + 20%
+            min_allowed = max(1.00, round(current_price * 1.2, 2))
+        else:
+            # Premier achat : minimum 1.00$ direct
+            min_allowed = 1.00
 
-        # Vérification 2 : L'utilisateur a-t-il assez d'argent ?
-        if u_data.get('balance', 0) < proposed_price:
-            raise Exception(f"Insufficient balance. You need {proposed_price}$")
-            
-        # --- EXECUTION DE LA TRANSACTION ---
-        
-        # 1. On débite l'acheteur
-        new_balance = round(u_data['balance'] - proposed_price, 2)
-        transaction.update(u_ref, {'balance': new_balance})
-        
-        # 2. On met à jour le pays avec le NOUVEAU prix choisi
+        if proposed_price < min_allowed:
+            raise Exception(f"Minimum bid required: {min_allowed}$")
+
+        if u_snap.get('balance', 0) < proposed_price:
+            raise Exception("Insufficient funds in your account.")
+
+        # Exécution de la conquête
+        transaction.update(u_ref, {'balance': round(u_snap['balance'] - proposed_price, 2)})
         transaction.set(c_ref, {
             'owner': user_id,
-            'price': proposed_price, # On stocke le prix libre
+            'price': proposed_price,
             'image_url': new_image_url,
             'last_update': datetime.utcnow()
         })
-        
-        # 3. Historique
-        history_ref = db.collection('history').document()
-        transaction.set(history_ref, {
-            'user': user_id,
-            'type': 'conquest',
-            'country': iso_code,
-            'amount': proposed_price,
-            'timestamp': datetime.utcnow()
-        })
-        
         return proposed_price
 
     try:
         transaction = db.transaction()
         final_price = update_in_transaction(transaction, user_ref, country_ref)
-        return jsonify(success=True, message=f"Conquered for {final_price}$")
+        return jsonify(success=True, price=final_price)
     except Exception as e:
         return jsonify(error=str(e)), 400
 
 if __name__ == '__main__':
-    # Flask utilise le port 5000 par défaut ou celui de l'OS
+    # Indispensable pour Render : écouter sur 0.0.0.0 et utiliser le port de l'environnement
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
