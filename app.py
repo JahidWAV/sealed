@@ -8,10 +8,10 @@ from flask_bcrypt import Bcrypt
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-# Utilise une variable d'environnement sur Render, sinon une clé par défaut
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_key_secret_123')
+# La clé secrète sécurise les sessions (indispensable pour les flash messages)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'votre_phrase_secrete_ultra_securisee')
 
-# Configuration du chemin de la base de données
+# Configuration du chemin de la base de données SQLite
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'sealed.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -28,11 +28,11 @@ class User(db.Model):
     private_key = db.Column(db.String(200))
     balance = db.Column(db.Float, default=100.0)
 
-# --- INITIALISATION CRUCIALE ---
-# On force la création des tables ici pour que Gunicorn les crée au démarrage
+# --- INITIALISATION DE LA BASE ---
+# Cette partie s'assure que les tables sont créées sur Render dès le lancement
 with app.app_context():
     db.create_all()
-    print("Base de données initialisée avec succès !")
+    print("Base de données initialisée et tables vérifiées !")
 
 # --- ROUTES ---
 
@@ -60,27 +60,31 @@ def register():
             flash('Ce pseudo est déjà pris.', 'danger')
             return redirect(url_for('register'))
         
-        # Sécurité & Cryptographie
+        # Hachage et Génération Wallet (Cryptographie SECP256k1)
         hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-        sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
-        pk = sk.get_verifying_key()
-        address = f"0x{hashlib.sha256(pk.to_string()).hexdigest()[:40]}"
         
         try:
+            # Correction ici : sk.to_string().hex() au lieu de to_ascii_string()
+            sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
+            pk = sk.get_verifying_key()
+            address = f"0x{hashlib.sha256(pk.to_string()).hexdigest()[:40]}"
+            
             new_user = User(
                 username=username, 
                 password=hashed_pw,
                 wallet_address=address,
-                private_key=sk.to_ascii_string().hex()
+                private_key=sk.to_string().hex()
             )
             db.session.add(new_user)
             db.session.commit()
-            flash('Inscription réussie ! Connectez-vous.', 'success')
+            
+            flash('Compte créé avec succès ! Connectez-vous.', 'success')
             return redirect(url_for('login'))
+            
         except Exception as e:
             db.session.rollback()
-            flash('Erreur lors de la création du compte.', 'danger')
-            print(f"Erreur DB : {e}")
+            print(f"Erreur DB lors de l'inscription : {e}")
+            flash("Erreur technique lors de la création du compte.", "danger")
             
     return render_template('register.html')
 
@@ -97,15 +101,18 @@ def login():
         
         if user and bcrypt.check_password_hash(user.password, password):
             session['user_id'] = user.id
+            flash(f'Bienvenue, {user.username} !', 'success')
             return redirect(url_for('dashboard'))
         else:
-            flash('Identifiants incorrects.', 'danger')
+            flash('Pseudo ou mot de passe incorrect.', 'danger')
             
     return render_template('login.html')
 
 @app.route('/dashboard')
 def dashboard():
+    # Protection de la route : vérifie si l'utilisateur est bien connecté
     if 'user_id' not in session:
+        flash('Veuillez vous connecter pour accéder au dashboard.', 'warning')
         return redirect(url_for('login'))
         
     user = User.query.get(session['user_id'])
@@ -114,6 +121,7 @@ def dashboard():
 @app.route('/logout')
 def logout():
     session.clear()
+    flash('Vous avez été déconnecté.', 'info')
     return redirect(url_for('login'))
 
 # --- LANCEMENT ---
