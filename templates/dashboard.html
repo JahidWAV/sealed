@@ -2,122 +2,123 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Dollar Map - Conquer the World</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <title>Sealed - Dashboard</title>
+    <style>
+        #map { height: 70vh; background: #0b0e14; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        .leaflet-container { background: #0b0e14 !important; }
+    </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen font-sans">
+<body class="bg-slate-900 text-white font-sans">
 
-    <div class="max-w-6xl mx-auto px-4 py-8">
-        <nav class="flex justify-between items-center mb-10 bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-xl">
-            <div class="flex items-center gap-2">
-                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center font-black italic">S</div>
-                <h1 class="text-xl font-black tracking-tighter uppercase">Sealed<span class="text-blue-500">.</span></h1>
-            </div>
-            <div class="flex items-center gap-6">
-                <div class="text-right">
-                    <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">Utilisateur</p>
-                    <p class="text-sm font-bold text-blue-400">{{ user.username }}</p>
+<div class="container mx-auto p-6">
+    <header class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold tracking-tighter text-blue-500">THE DOLLAR MAP<span class="text-white">.com</span></h1>
+        <div class="bg-slate-800 px-4 py-2 rounded-full border border-slate-700">
+            Solde: <span id="user-balance" class="font-bold text-green-400">0.00 €</span>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div class="lg:col-span-2">
+            <div id="map"></div>
+        </div>
+
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700">
+            <h2 id="country-name" class="text-2xl font-bold mb-2">Sélectionnez un pays</h2>
+            <div id="country-info" class="hidden">
+                <p class="text-slate-400 mb-4">Code: <span id="country-code" class="text-white"></span></p>
+                <div class="bg-slate-900 p-4 rounded-xl mb-6">
+                    <p class="text-sm text-slate-500 uppercase">Prix actuel</p>
+                    <p id="country-price" class="text-3xl font-mono font-bold text-blue-400">1.00 €</p>
                 </div>
-                <a href="/logout" class="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-4 py-2 rounded-xl text-xs font-black transition">LOGOUT</a>
-            </div>
-        </nav>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="mb-6 p-4 rounded-xl text-sm font-bold text-center border {% if category == 'danger' %}bg-red-500/10 text-red-400 border-red-500/50{% else %}bg-green-500/10 text-green-400 border-green-500/50{% endif %}">
-                {{ message }}
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            <div class="lg:col-span-2 space-y-8">
-                <div class="bg-gradient-to-br from-blue-700 to-blue-900 p-8 rounded-3xl shadow-2xl relative overflow-hidden border border-blue-400/20">
-                    <div class="relative z-10">
-                        <p class="text-blue-200 text-xs font-black uppercase tracking-widest mb-2">Solde Actuel</p>
-                        <h2 class="text-6xl font-black tracking-tighter mb-8">{{ "%.2f"|format(user.balance) }} €</h2>
-                        <div class="bg-black/30 backdrop-blur-md p-4 rounded-2xl border border-white/10">
-                            <p class="text-[10px] text-blue-300 font-black uppercase mb-1">Adresse Publique</p>
-                            <code class="text-xs font-mono text-white break-all">{{ user.wallet_address }}</code>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-gray-800 rounded-3xl border border-gray-700 overflow-hidden">
-                    <div class="p-6 border-b border-gray-700 font-black text-xs uppercase tracking-widest text-gray-400">Derniers Mouvements</div>
-                    <div class="divide-y divide-gray-700">
-                        {% for tx in transactions %}
-                        <div class="p-4 flex justify-between items-center hover:bg-gray-700/20">
-                            <div>
-                                <p class="text-[10px] text-gray-500 font-bold">{{ tx.timestamp.strftime('%d/%m %H:%M') }}</p>
-                                <p class="text-sm font-mono text-blue-300 truncate w-40 sm:w-64">{{ tx.recipient_addr }}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-lg font-black text-white">-{{ "%.2f"|format(tx.amount) }} €</p>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-
-            <div class="space-y-6">
-                <div class="bg-gray-800 p-6 rounded-3xl border-t-4 border-t-green-500 shadow-xl">
-                    <h3 class="text-lg font-black mb-4 text-green-500">💳 DÉPOSER</h3>
-                    <form action="/create-checkout-session" method="POST" class="space-y-4">
-                        <input type="number" step="0.01" name="amount" id="dep_amt" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-green-500" required>
-                        
-                        <div class="bg-black/20 p-3 rounded-xl text-[11px] font-bold space-y-1">
-                            <div class="flex justify-between">
-                                <span class="text-gray-500 italic">Frais (1.2% + 0.25€)</span>
-                                <span id="fee_val" class="text-red-400">0.00 €</span>
-                            </div>
-                            <div class="flex justify-between border-t border-white/5 pt-1 font-black">
-                                <span class="text-gray-400">Net Crédité</span>
-                                <span id="net_val" class="text-green-400">0.00 €</span>
-                            </div>
-                        </div>
-                        <button type="submit" class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Payer</button>
-                    </form>
-                </div>
-
-                <div class="bg-gray-800 p-6 rounded-3xl border border-gray-700">
-                    <h3 class="text-lg font-black mb-4 text-blue-500 font-black italic">💸 ENVOYER</h3>
-                    <form action="/send" method="POST" class="space-y-4">
-                        <input type="text" name="recipient_address" placeholder="0x..." class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-mono text-xs focus:border-blue-500" required>
-                        <input type="number" step="0.01" name="amount" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-blue-500" required>
-                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Transférer</button>
-                    </form>
-                </div>
-
-                <div class="bg-gray-800 p-6 rounded-3xl border-t-4 border-t-orange-500 shadow-xl">
-                    <h3 class="text-lg font-black mb-4 text-orange-500">🏦 RETIRER</h3>
-                    <form action="/withdraw" method="POST" class="space-y-4">
-                        <input type="text" name="iban" placeholder="IBAN (FR76...)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-mono text-xs focus:border-orange-500" required>
-                        <input type="number" step="0.01" name="amount" placeholder="Montant (€)" class="w-full bg-gray-900 border border-gray-700 p-4 rounded-2xl outline-none font-bold text-xl focus:border-orange-500" required>
-                        <button type="submit" class="w-full bg-orange-600 hover:bg-orange-500 py-4 rounded-2xl font-black uppercase tracking-widest transition shadow-lg">Virement</button>
-                    </form>
-                </div>
+                
+                <label class="block text-sm text-slate-400 mb-2">URL de votre image (Logo/Photo)</label>
+                <input type="text" id="image-url" placeholder="https://..." class="w-full bg-slate-700 border-none rounded-lg p-3 mb-4 focus:ring-2 focus:ring-blue-500">
+                
+                <button onclick="processPurchase()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all">
+                    CONQUÉRIR CE PAYS
+                </button>
             </div>
         </div>
     </div>
+</div>
 
-    <script>
-        const input = document.getElementById('dep_amt');
-        const feeVal = document.getElementById('fee_val');
-        const netVal = document.getElementById('net_val');
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([20, 0], 2);
+    let selectedISO = null;
+    let countryLayers = {};
 
-        input.addEventListener('input', () => {
-            const val = parseFloat(input.value) || 0;
-            const fee = val > 0 ? (val * 0.012) + 0.25 : 0;
-            const net = val - fee;
-            feeVal.innerText = fee.toFixed(2) + ' €';
-            netVal.innerText = (net > 0 ? net.toFixed(2) : '0.00') + ' €';
+    // Fond de carte sombre
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+    // Fonction pour créer un motif d'image dans le SVG de la carte
+    function updatePattern(id, url) {
+        let defs = document.querySelector('svg defs') || document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        if (!defs.parentNode) document.querySelector('svg').appendChild(defs);
+        
+        let pattern = document.getElementById('pat-'+id);
+        if(!pattern) {
+            pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+            pattern.setAttribute('id', 'pat-'+id);
+            pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+            pattern.setAttribute('width', '100');
+            pattern.setAttribute('height', '100');
+            const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
+            img.setAttribute('width', '100');
+            img.setAttribute('height', '100');
+            pattern.appendChild(img);
+            defs.appendChild(pattern);
+        }
+        pattern.querySelector('image').setAttribute('href', url);
+    }
+
+    // Charger les frontières et les données Firestore
+    Promise.all([
+        fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
+        fetch('/api/countries').then(r => r.json())
+    ]).then(([geoData, dbData]) => {
+        L.geoJSON(geoData, {
+            style: (f) => {
+                const iso = f.properties.iso_a3;
+                if(dbData[iso] && dbData[iso].image_url) {
+                    updatePattern(iso, dbData[iso].image_url);
+                    return { fillOpacity: 0.7, fillColor: `url(#pat-${iso})`, color: '#334155', weight: 1 };
+                }
+                return { fillOpacity: 0.2, fillColor: '#1e293b', color: '#334155', weight: 1 };
+            },
+            onEachFeature: (f, layer) => {
+                layer.on('click', () => {
+                    selectedISO = f.properties.iso_a3;
+                    document.getElementById('country-name').innerText = f.properties.name;
+                    document.getElementById('country-code').innerText = selectedISO;
+                    document.getElementById('country-info').classList.remove('hidden');
+                    const data = dbData[selectedISO] || {price: 1.0};
+                    document.getElementById('country-price').innerText = data.price.toFixed(2) + " €";
+                });
+            }
+        }).addTo(map);
+    });
+
+    async function processPurchase() {
+        const url = document.getElementById('image-url').value;
+        if(!url) return alert("Mettez une URL d'image !");
+        
+        const res = await fetch('/buy-country', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({code: selectedISO, image_url: url})
         });
-    </script>
+        const result = await res.json();
+        if(result.success) {
+            alert("Pays conquis !");
+            location.reload();
+        } else {
+            alert(result.error);
+        }
+    }
+</script>
 </body>
 </html>
