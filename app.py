@@ -20,12 +20,11 @@ endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET')
 # --- FIREBASE ---
 if not firebase_admin._apps:
     fb_config = os.environ.get('FIREBASE_CONFIG')
-    if fb_config:
-        cred = credentials.Certificate(json.loads(fb_config))
-        firebase_admin.initialize_app(cred)
+    cred = credentials.Certificate(json.loads(fb_config))
+    firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- WEBHOOK (CORRECTION FINALE ATTRIBUTEERROR) ---
+# --- WEBHOOK (VERSION INFAILLIBLE) ---
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -33,79 +32,75 @@ def webhook():
     sig_header = request.headers.get('Stripe-Signature')
 
     try:
-        # On reconstruit l'événement
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        # 1. On construit l'événement
+        event_obj = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        
+        # 2. CRUCIAL : On convertit l'objet Stripe en dictionnaire Python standard
+        # Cela règle définitivement le problème "AttributeError: get"
+        event = json.loads(json.dumps(event_obj.to_dict_recursive()))
+        
     except Exception as e:
-        print(f"⚠️ Erreur Signature : {e}")
+        print(f"⚠️ Erreur Signature/Parsing : {e}")
         return jsonify(success=False), 400
 
-    # ACCÈS SÉCURISÉ : On utilise event['type'] car event.get() crash
-    event_type = event['type']
+    event_type = event.get('type')
     print(f"📩 Webhook reçu : {event_type}")
 
     if event_type in ['checkout.session.completed', 'checkout.session.async_payment_succeeded']:
-        # On accède aux données via les clés du dictionnaire
-        session_obj = event['data']['object']
+        data_obj = event.get('data', {}).get('object', {})
         
-        # Récupération sécurisée du username dans metadata
-        # On utilise .get() sur metadata car c'est un vrai dict Python
-        metadata = session_obj.get('metadata', {})
+        # Récupération du username
+        metadata = data_obj.get('metadata', {})
         username = metadata.get('username')
         
-        # Backup : Recherche par Customer ID
+        # Backup par Customer ID
         if not username:
-            customer_id = session_obj.get('customer')
-            print(f"🔍 Metadata vide. Recherche via Customer ID : {customer_id}")
-            # Correction : Utilisation du mot-clé filter pour éviter le warning
-            user_query = db.collection('users').where(filter=firestore.FieldFilter('stripe_customer_id', '==', customer_id)).limit(1).get()
-            if user_query:
-                username = user_query[0].id
+            cust_id = data_obj.get('customer')
+            print(f"🔍 Recherche par Customer ID : {cust_id}")
+            users = db.collection('users').where(filter=firestore.FieldFilter('stripe_customer_id', '==', cust_id)).limit(1).get()
+            if users:
+                username = users[0].id
             else:
-                print("❌ Utilisateur introuvable.")
+                print("❌ Utilisateur non trouvé.")
                 return jsonify(success=True), 200
 
         # Calcul financier
-        amount_total = session_obj.get('amount_total', 0)
-        gross_amount = amount_total / 100
-        fees = (gross_amount * 0.012) + 0.25
-        net_amount = round(gross_amount - fees, 2)
+        amount_total = data_obj.get('amount_total', 0)
+        net_amount = round((amount_total / 100) * 0.988 - 0.25, 2) # Version simplifiée (1.2% + 0.25)
 
-        # Mise à jour Firestore
         try:
             user_ref = db.collection('users').document(username)
             
             @firestore.transactional
-            def update_balance_safe(transaction, user_ref, amount):
+            def update_balance(transaction, user_ref, amount):
                 snapshot = user_ref.get(transaction=transaction)
-                if not snapshot.exists:
-                    return False
+                if not snapshot.exists: return False
                 
-                user_dict = snapshot.to_dict()
-                current_bal = float(user_dict.get('balance', 0.0) or 0.0)
-                new_bal = round(current_bal + amount, 2)
+                user_data = snapshot.to_dict()
+                old_bal = float(user_data.get('balance', 0.0) or 0.0)
+                new_bal = round(old_bal + amount, 2)
                 
                 transaction.update(user_ref, {'balance': new_bal})
                 
-                tx_ref = db.collection('transactions').document()
-                transaction.set(tx_ref, {
+                # Log transaction
+                transaction.set(db.collection('transactions').document(), {
                     'sender_un': 'STRIPE_SYSTEM',
-                    'recipient_addr': user_dict.get('wallet_address', 'Unknown'),
+                    'recipient_addr': user_data.get('wallet_address'),
                     'amount': amount,
                     'type': 'deposit',
                     'timestamp': datetime.utcnow()
                 })
                 return True
 
-            success = update_balance_safe(db.transaction(), user_ref, net_amount)
-            if success:
+            if update_balance(db.transaction(), user_ref, net_amount):
                 print(f"✅ CRÉDIT EFFECTUÉ : {username} (+{net_amount}€)")
         except Exception as e:
-            print(f"❌ ERREUR TRANSACTION : {e}")
+            print(f"❌ Erreur Transaction : {e}")
             return jsonify(success=False), 500
 
     return jsonify(success=True), 200
 
-# --- AUTRES ROUTES ---
+# --- LE RESTE DU CODE (SANS CHANGEMENT) ---
 
 @app.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
@@ -115,22 +110,15 @@ def create_checkout_session():
         username = session['user_id']
         user_ref = db.collection('users').document(username)
         user_data = user_ref.get().to_dict()
-        
         cust_id = user_data.get('stripe_customer_id')
         if not cust_id:
             customer = stripe.Customer.create(description=f"User: {username}", metadata={'username': username})
             cust_id = customer.id
             user_ref.update({'stripe_customer_id': cust_id})
-
         checkout_session = stripe.checkout.Session.create(
             customer=cust_id,
             payment_method_types=['card', 'customer_balance'],
-            payment_method_options={
-                'customer_balance': {
-                    'funding_type': 'bank_transfer',
-                    'bank_transfer': {'type': 'eu_bank_transfer', 'eu_bank_transfer': {'country': 'FR'}}
-                }
-            },
+            payment_method_options={'customer_balance': {'funding_type': 'bank_transfer', 'bank_transfer': {'type': 'eu_bank_transfer', 'eu_bank_transfer': {'country': 'FR'}}}},
             line_items=[{'price_data': {'currency': 'eur', 'product_data': {'name': 'Dépôt Sealed'}, 'unit_amount': int(amount * 100)}, 'quantity': 1}],
             mode='payment',
             success_url=url_for('dashboard', _external=True) + "?status=pending",
