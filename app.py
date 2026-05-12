@@ -94,7 +94,6 @@ def success():
                 'last_update': datetime.utcnow()
             })
 
-        # Log de la contribution individuelle
         country_ref.collection('contributions').add({
             'uid': uid,
             'username': username,
