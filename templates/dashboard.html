@@ -7,7 +7,6 @@
     
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -16,31 +15,27 @@
     <style>
         :root { --neon: #00f2ff; --bg: #05070a; }
         body, html { margin: 0; height: 100%; background: var(--bg); font-family: 'JetBrains Mono', monospace; color: white; overflow: hidden; }
-        
-        /* La Map prend tout l'écran en fond */
         #map { position: absolute; inset: 0; background: var(--bg) !important; z-index: 1; }
         .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.15) contrast(1.5); }
 
-        /* Conteneur UI Global : IMPORTANT pour laisser passer les clics sur la map */
+        /* Superposition UI */
         .ui-overlay { position: absolute; inset: 0; z-index: 1000; pointer-events: none; }
         .ui-element { pointer-events: auto; }
+        .glass-panel { background: rgba(10, 12, 16, 0.92); border: 1px solid rgba(0, 242, 255, 0.1); backdrop-filter: blur(12px); }
+        
+        /* Logo Style Original */
+        .logo-box { border: 1px solid rgba(0, 242, 255, 0.3); background: rgba(5, 7, 10, 0.8); }
 
-        /* Style Logo Version Précédente */
-        .logo-container {
-            border: 1px solid rgba(0, 242, 255, 0.2);
-            background: rgba(13, 17, 23, 0.9);
-            box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+        /* Panel Central Animé */
+        #contribution-panel {
+            transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+            transform: translate(-50%, 120%);
         }
+        #contribution-panel.active { transform: translate(-50%, 0); }
 
         .neon-text { color: var(--neon); text-shadow: 0 0 10px rgba(0, 242, 255, 0.5); }
-        .glass-panel { background: rgba(13, 17, 23, 0.95); border: 1px solid rgba(0, 242, 255, 0.1); backdrop-filter: blur(5px); }
-
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: var(--neon); }
-
-        .dropdown-menu { display: none; position: absolute; right: 0; top: 110%; width: 200px; }
-        .dropdown-menu.show { display: block; }
     </style>
 </head>
 <body>
@@ -49,87 +44,88 @@
 
     <div class="ui-overlay">
         
+        <!-- LOGO CENTRÉ (Version Originale) -->
         <div class="absolute top-6 left-1/2 -translate-x-1/2 ui-element">
-            <div class="logo-container px-8 py-3 flex items-center gap-4">
-                <div class="h-8 w-1 bg-cyan-400"></div>
+            <div class="logo-box px-10 py-3 flex items-center gap-4">
+                <div class="h-6 w-1 bg-cyan-400 shadow-[0_0_10px_#00f2ff]"></div>
                 <h1 class="text-xl font-black italic tracking-tighter uppercase">THE DOLLAR MAP</h1>
             </div>
         </div>
 
-        <div class="absolute top-6 left-6 w-64 ui-element">
-            <div class="glass-panel p-4 border-l-2 border-cyan-400 max-h-[80vh] flex flex-col">
-                <h2 class="text-[9px] font-bold uppercase tracking-[0.3em] text-cyan-400/60 mb-4 flex justify-between items-center">
-                    Ranking <span>LIVE</span>
-                </h2>
-                <div id="scoreboard" class="space-y-3 overflow-y-auto pr-1">
-                    </div>
+        <!-- LEADERBOARD GAUCHE -->
+        <div class="absolute top-6 left-6 w-72 ui-element">
+            <div class="glass-panel p-5 border-l-2 border-cyan-400 max-h-[85vh] flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-[9px] font-bold uppercase tracking-[0.3em] text-cyan-400">Global Ranking</h2>
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                </div>
+                <div id="scoreboard" class="space-y-2 overflow-y-auto pr-1">
+                    <!-- Nations Ranking -->
+                </div>
             </div>
         </div>
 
+        <!-- USER / AUTH DROITE -->
         <div class="absolute top-6 right-6 ui-element">
-            <div id="auth-logged-out">
-                <button onclick="showAuthModal()" class="glass-panel text-[10px] px-6 py-2 uppercase tracking-widest border border-cyan-400/20 hover:bg-cyan-400/10 transition-all">Identify</button>
-            </div>
             <div id="auth-logged-in" class="hidden relative">
-                <button onclick="toggleSettings()" class="glass-panel px-4 py-2 flex items-center gap-3 border border-cyan-400/20">
-                    <span id="user-display" class="text-[10px] font-bold neon-text uppercase tracking-widest">---</span>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+                <button onclick="toggleSettings()" class="glass-panel px-5 py-2 text-[10px] neon-text font-bold uppercase tracking-widest border border-cyan-400/20">
+                    <span id="user-display">COMMANDER</span>
                 </button>
-                <div id="settings-menu" class="dropdown-menu glass-panel p-2 border border-cyan-400/20">
-                    <button onclick="openChangeUsername()" class="w-full text-left p-2 text-[9px] hover:bg-cyan-400/10 uppercase tracking-widest border-b border-white/5">Change Pseudo</button>
-                    <button onclick="logout()" class="w-full text-left p-2 text-[9px] hover:bg-red-500/10 text-red-400 uppercase tracking-widest">Disconnect</button>
+                <div id="settings-menu" class="hidden absolute right-0 mt-2 w-48 glass-panel p-2 border border-cyan-400/30">
+                    <button onclick="logout()" class="w-full text-left p-3 text-[9px] text-red-400 hover:bg-red-500/10 uppercase font-bold">Disconnect</button>
                 </div>
             </div>
+            <button id="auth-logged-out" onclick="showAuthModal()" class="glass-panel px-6 py-2 text-[10px] uppercase tracking-widest border border-white/10 hover:border-cyan-400 transition-all">Enlist Identity</button>
         </div>
 
-        <div id="buy-panel" class="absolute bottom-10 right-10 w-80 glass-panel p-6 translate-x-[120%] transition-all duration-500 ui-element">
-            <h2 id="country-name" class="text-xl font-bold uppercase italic mb-4">---</h2>
-            <div class="grid grid-cols-2 gap-3 mb-6">
-                <div class="p-2 bg-white/5">
-                    <p class="text-[7px] text-slate-500 uppercase">Current</p>
-                    <div id="country-price" class="text-sm font-bold">$1.00</div>
+        <!-- CENTRE DE CONTRIBUTION (BAS MILIEU) -->
+        <div id="contribution-panel" class="absolute bottom-10 left-1/2 w-[500px] glass-panel p-10 ui-element border-t-2 border-cyan-400 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+            <div class="flex justify-between items-start mb-8">
+                <div>
+                    <h2 id="country-name" class="text-3xl font-black italic uppercase tracking-tighter">---</h2>
+                    <p class="text-[9px] text-cyan-400 tracking-[0.4em] mt-1 font-bold">NATIONAL TREASURY</p>
                 </div>
-                <div class="p-2 bg-cyan-400/5 border-l border-cyan-400">
-                    <p class="text-[7px] text-cyan-400 uppercase">Bid</p>
-                    <input type="number" id="custom-price" class="w-full bg-transparent text-sm font-bold outline-none">
+                <button onclick="closePanel()" class="text-slate-500 hover:text-white transition-colors">✕</button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-8 mb-10">
+                <div class="space-y-1">
+                    <span class="text-[8px] uppercase text-slate-500 font-bold">Total Influence</span>
+                    <div id="country-total" class="text-3xl font-black font-mono neon-text">$0</div>
+                    <div id="country-citizens" class="text-[9px] text-slate-400 uppercase font-bold">0 Contributors</div>
+                </div>
+                <div class="border-l border-white/10 pl-8 space-y-2">
+                    <span class="text-[8px] uppercase text-cyan-400 font-bold">Add Funds</span>
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl font-bold text-white/50">$</span>
+                        <input type="number" id="custom-amount" value="5.00" step="1" class="bg-transparent text-3xl font-black outline-none w-full border-b border-cyan-400/20 focus:border-cyan-400 transition-all">
+                    </div>
                 </div>
             </div>
-            <button id="pay-button" onclick="initiatePayment()" class="w-full bg-cyan-400 text-black font-black py-3 text-[10px] uppercase tracking-widest hover:shadow-[0_0_15px_#00f2ff]">Confirm conquest</button>
+
+            <button onclick="initiatePayment()" class="w-full bg-cyan-400 text-black font-black py-5 text-[11px] uppercase tracking-[0.4em] hover:bg-white transition-all shadow-[0_0_20px_rgba(0,242,255,0.3)]">
+                Contribute to Glory
+            </button>
         </div>
 
     </div>
 
-    <div id="auth-modal" class="hidden fixed inset-0 z-[4000] bg-black/90 flex items-center justify-center p-4">
-        <div class="w-full max-w-sm glass-panel p-8 border border-cyan-400/30 ui-element">
-            <h3 id="auth-title" class="text-lg font-black uppercase text-center mb-6 italic tracking-tighter">Terminal Access</h3>
-            <div class="space-y-4">
-                <div id="username-field" class="hidden">
-                    <label class="text-[8px] text-cyan-400 uppercase mb-1 block">Username</label>
-                    <input type="text" id="auth-user" class="w-full bg-white/5 border border-white/10 p-3 text-xs outline-none focus:border-cyan-400">
-                </div>
-                <div>
-                    <label class="text-[8px] text-cyan-400 uppercase mb-1 block">Email</label>
-                    <input type="email" id="auth-email" class="w-full bg-white/5 border border-white/10 p-3 text-xs outline-none focus:border-cyan-400">
-                </div>
-                <div>
-                    <label class="text-[8px] text-cyan-400 uppercase mb-1 block">Password</label>
-                    <input type="password" id="auth-pass" class="w-full bg-white/5 border border-white/10 p-3 text-xs outline-none focus:border-cyan-400">
-                </div>
+    <!-- MODAL AUTH -->
+    <div id="auth-modal" class="hidden fixed inset-0 z-[4000] bg-black/95 flex items-center justify-center p-4">
+        <div class="w-full max-w-sm glass-panel p-10 ui-element border border-cyan-400/30">
+            <h3 class="text-xl font-black text-center mb-8 uppercase italic tracking-widest">Authentication</h3>
+            <div class="space-y-5">
+                <input type="email" id="auth-email" placeholder="EMAIL ADDRESS" class="w-full bg-white/5 border border-white/10 p-4 text-[10px] outline-none focus:border-cyan-400">
+                <input type="password" id="auth-pass" placeholder="ACCESS CIPHER" class="w-full bg-white/5 border border-white/10 p-4 text-[10px] outline-none focus:border-cyan-400">
             </div>
-            <div id="login-actions" class="mt-6 space-y-2">
-                <button onclick="handleAuth('login')" class="w-full bg-cyan-400 text-black font-bold py-3 text-[10px] uppercase">Login</button>
-                <button onclick="toggleAuthMode(true)" class="w-full text-[8px] text-slate-500 uppercase py-2">No account? Create</button>
-            </div>
-            <div id="signup-actions" class="hidden mt-6 space-y-2">
-                <button onclick="handleAuth('signup')" class="w-full bg-cyan-400 text-black font-bold py-3 text-[10px] uppercase">Create Account</button>
-                <button onclick="toggleAuthMode(false)" class="w-full text-[8px] text-slate-500 uppercase py-2">Back to Login</button>
-            </div>
-            <button onclick="hideAuthModal()" class="w-full mt-4 text-[8px] text-slate-600 uppercase hover:text-white">Close</button>
+            <button onclick="handleAuth('login')" class="w-full bg-cyan-400 text-black font-black py-4 text-[10px] mt-8 uppercase tracking-widest">Execute</button>
+            <button onclick="hideAuthModal()" class="w-full mt-4 text-[8px] text-slate-600 uppercase tracking-widest hover:text-white">Abort</button>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        // CONFIG FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyCGbqxVZBers7XbTUM94A3GM5pkBYYt3_0",
             authDomain: "sealed-2bd55.firebaseapp.com",
@@ -149,56 +145,39 @@
 
         // --- AUTH ---
         auth.onAuthStateChanged(user => {
-            const outB = document.getElementById('auth-logged-out'), inB = document.getElementById('auth-logged-in');
-            if (user) {
-                outB.classList.add('hidden'); inB.classList.remove('hidden');
-                document.getElementById('user-display').innerText = (user.displayName || user.email.split('@')[0]);
-                hideAuthModal();
-            } else {
-                outB.classList.remove('hidden'); inB.classList.add('hidden');
-            }
+            document.getElementById('auth-logged-in').classList.toggle('hidden', !user);
+            document.getElementById('auth-logged-out').classList.toggle('hidden', !!user);
+            if(user) document.getElementById('user-display').innerText = user.email.split('@')[0];
         });
 
-        async function handleAuth(type) {
-            const email = document.getElementById('auth-email').value, pass = document.getElementById('auth-pass').value;
+        async function handleAuth(t) {
+            const e = document.getElementById('auth-email').value, p = document.getElementById('auth-pass').value;
             try {
-                if (type === 'signup') {
-                    const res = await auth.createUserWithEmailAndPassword(email, pass);
-                    await res.user.updateProfile({ displayName: document.getElementById('auth-user').value });
-                    window.location.reload();
-                } else await auth.signInWithEmailAndPassword(email, pass);
-            } catch(e) { alert(e.message); }
+                if(t === 'login') await auth.signInWithEmailAndPassword(e,p);
+                hideAuthModal();
+            } catch(err) { alert("Invalid access credentials."); }
         }
 
-        function toggleAuthMode(s) {
-            document.getElementById('username-field').classList.toggle('hidden', !s);
-            document.getElementById('login-actions').classList.toggle('hidden', s);
-            document.getElementById('signup-actions').classList.toggle('hidden', !s);
-        }
-
-        function toggleSettings() { document.getElementById('settings-menu').classList.toggle('show'); }
-        function logout() { auth.signOut(); }
+        function toggleSettings() { document.getElementById('settings-menu').classList.toggle('hidden'); }
+        function logout() { auth.signOut(); window.location.reload(); }
         function showAuthModal() { document.getElementById('auth-modal').classList.remove('hidden'); }
         function hideAuthModal() { document.getElementById('auth-modal').classList.add('hidden'); }
-        async function openChangeUsername() {
-            const n = prompt("New username:");
-            if(n && auth.currentUser) { await auth.currentUser.updateProfile({displayName: n}); window.location.reload(); }
-        }
 
-        // --- MAP & LOGIC ---
+        // --- MAP & DATA ---
         async function load() {
             const [g, d] = await Promise.all([
                 fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson').then(r => r.json()),
                 fetch('/api/countries').then(r => r.json())
             ]);
             countriesDB = d;
-            if(geoLayer) map.removeLayer(geoLayer);
             
+            if(geoLayer) map.removeLayer(geoLayer);
             geoLayer = L.geoJSON(g, {
                 style: (f) => {
                     const data = countriesDB[f.properties.iso_a3];
+                    const intensity = data ? Math.min(data.total_invested / 500, 1) : 0;
                     return {
-                        fillOpacity: data ? 0.7 : 0.2,
+                        fillOpacity: data ? 0.3 + (intensity * 0.5) : 0.15,
                         fillColor: data ? '#00f2ff' : '#0a0c10',
                         color: data ? '#00f2ff' : '#1a1d23',
                         weight: 1
@@ -206,22 +185,7 @@
                 },
                 onEachFeature: (f, layer) => {
                     layer.on('click', (e) => {
-                        // Reset précédent
-                        if(selectedLayer) geoLayer.resetStyle(selectedLayer);
-                        
-                        // Nouveau style permanent
-                        selectedLayer = layer;
-                        layer.setStyle({ color: '#fff', weight: 3, fillOpacity: 0.4 });
-                        
-                        const iso = f.properties.iso_a3;
-                        const data = countriesDB[iso];
-                        selectedISO = iso;
-                        
-                        document.getElementById('country-name').innerText = f.properties.name;
-                        document.getElementById('country-price').innerText = data ? `$${data.price.toFixed(2)}` : "FREE";
-                        document.getElementById('custom-price').value = data ? (data.price * 1.2).toFixed(2) : "1.00";
-                        document.getElementById('buy-panel').style.transform = "translateX(0)";
-                        
+                        selectCountry(f.properties.iso_a3, f.properties.name, layer);
                         L.DomEvent.stopPropagation(e);
                     });
                 }
@@ -229,53 +193,77 @@
             renderLeaderboard();
         }
 
+        function selectCountry(iso, name, layer = null) {
+            if(selectedLayer) geoLayer.resetStyle(selectedLayer);
+            selectedISO = iso;
+            const data = countriesDB[iso];
+            
+            if(layer) {
+                selectedLayer = layer;
+                layer.setStyle({ color: '#fff', weight: 3, fillOpacity: 0.6 });
+            }
+
+            document.getElementById('country-name').innerText = name;
+            document.getElementById('country-total').innerText = `$${(data?.total_invested || 0).toFixed(2)}`;
+            document.getElementById('country-citizens').innerText = `${data?.contributor_count || 0} Contributors`;
+            document.getElementById('contribution-panel').classList.add('active');
+        }
+
         function renderLeaderboard() {
-            const sorted = Object.entries(countriesDB).sort((a,b) => b[1].price - a[1].price).slice(0, 15);
-            document.getElementById('scoreboard').innerHTML = sorted.map(([iso, data]) => {
-                const flag = iso.substring(0,2).toLowerCase();
-                return `
-                    <div class="flex items-center justify-between border-b border-white/5 pb-2">
-                        <div class="flex items-center gap-2">
-                            <img src="https://flagcdn.com/w20/${flag}.png" onerror="this.style.opacity='0'" class="w-4 h-3 object-cover rounded-sm">
-                            <span class="font-bold text-[10px]">${iso}</span>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-cyan-400 font-bold">$${data.price.toFixed(0)}</div>
-                            <div class="text-[6px] text-slate-500 uppercase truncate max-w-[60px]">${data.owner_name || 'Legacy'}</div>
-                        </div>
+            const sorted = Object.entries(countriesDB).sort((a,b) => b[1].total_invested - a[1].total_invested).slice(0, 20);
+            document.getElementById('scoreboard').innerHTML = sorted.map(([iso, data]) => `
+                <div onclick="clickLeaderboard('${iso}')" class="flex items-center justify-between p-3 border-b border-white/5 hover:bg-cyan-400/5 cursor-pointer group transition-all">
+                    <div class="flex items-center gap-3">
+                        <img src="https://flagcdn.com/w20/${iso.substring(0,2).toLowerCase()}.png" class="w-4 h-3 object-cover rounded-[1px] opacity-70 group-hover:opacity-100">
+                        <span class="font-bold text-[10px] tracking-tighter">${iso}</span>
                     </div>
-                `;
-            }).join('');
+                    <div class="text-right">
+                        <div class="text-cyan-400 font-bold text-[11px]">$${data.total_invested.toFixed(0)}</div>
+                        <div class="text-[6px] text-slate-500 uppercase font-black">${data.contributor_count} CITIZENS</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function clickLeaderboard(iso) {
+            geoLayer.eachLayer(layer => {
+                if(layer.feature.properties.iso_a3 === iso) {
+                    selectCountry(iso, layer.feature.properties.name, layer);
+                    map.flyTo(layer.getBounds().getCenter(), 4);
+                }
+            });
         }
 
         async function initiatePayment() {
             if(!auth.currentUser) return showAuthModal();
-            const btn = document.getElementById('pay-button');
-            btn.disabled = true; btn.innerText = "Processing...";
+            const btn = event.target;
+            btn.disabled = true; btn.innerText = "AUTHENTICATING...";
+            
             try {
                 const res = await fetch('/create-checkout-session', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ 
                         code: selectedISO, 
-                        price: document.getElementById('custom-price').value,
+                        price: document.getElementById('custom-amount').value,
                         user_id: auth.currentUser.uid,
-                        username: auth.currentUser.displayName || auth.currentUser.email.split('@')[0]
+                        username: auth.currentUser.email.split('@')[0]
                     })
                 });
                 const s = await res.json();
                 if(s.id) stripe.redirectToCheckout({ sessionId: s.id });
                 else alert(s.error);
             } catch(e) { console.error(e); }
-            btn.disabled = false; btn.innerText = "Confirm conquest";
+            btn.disabled = false; btn.innerText = "Contribute to Glory";
         }
 
-        map.on('click', () => {
+        function closePanel() { 
+            document.getElementById('contribution-panel').classList.remove('active');
             if(selectedLayer) geoLayer.resetStyle(selectedLayer);
             selectedLayer = null;
-            document.getElementById('buy-panel').style.transform = "translateX(120%)";
-            document.getElementById('settings-menu').classList.remove('show');
-        });
+        }
+
+        map.on('click', () => closePanel());
 
         load();
         setInterval(load, 30000);
