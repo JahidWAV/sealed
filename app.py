@@ -9,10 +9,10 @@ from datetime import datetime
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'glory_to_nations_2026')
 
-# --- CONFIG STRIPE ---
+# --- STRIPE CONFIG ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 
-# --- CONFIG FIREBASE ---
+# --- FIREBASE CONFIG ---
 firebase_config_json = os.environ.get('FIREBASE_CONFIG')
 if firebase_config_json:
     cred = credentials.Certificate(json.loads(firebase_config_json))
@@ -32,6 +32,28 @@ def get_countries():
     try:
         countries_ref = db.collection('territories').stream()
         return jsonify({c.id: c.to_dict() for c in countries_ref})
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+@app.route('/api/top-contributors/<iso>')
+def get_top_contributors(iso):
+    try:
+        # Récupère les 10 plus grosses contributions pour ce pays
+        contribs = db.collection('territories').document(iso).collection('contributions')\
+                     .order_by('amount', direction=firestore.Query.DESCENDING).limit(10).stream()
+        return jsonify([c.to_dict() for c in contribs])
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+@app.route('/api/user-stats/<uid>')
+def get_user_stats(uid):
+    try:
+        # Récupère toutes les contributions d'un utilisateur spécifique
+        docs = db.collection_group('contributions').where('uid', '==', uid).stream()
+        stats = []
+        for d in docs:
+            stats.append(d.to_dict())
+        return jsonify(stats)
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -55,8 +77,8 @@ def create_checkout_session():
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': f"CONTRIBUTION: {iso_code}",
-                        'description': f"Support from Commander {username}",
+                        'name': f"NATIONAL CONTRIBUTION: {iso_code}",
+                        'description': f"Support from {username}",
                     },
                     'unit_amount': int(amount * 100),
                 },
@@ -79,26 +101,28 @@ def success():
 
     if iso_code and amount and uid:
         country_ref = db.collection('territories').document(iso_code)
-        doc = country_ref.get()
         
-        if doc.exists:
-            country_ref.update({
-                'total_invested': firestore.Increment(amount),
-                'contributor_count': firestore.Increment(1),
-                'last_update': datetime.utcnow()
-            })
-        else:
-            country_ref.set({
-                'total_invested': amount,
-                'contributor_count': 1,
-                'last_update': datetime.utcnow()
-            })
+        # Vérifier si l'utilisateur a déjà contribué à ce pays
+        prev_contribs = country_ref.collection('contributions').where('uid', '==', uid).limit(1).get()
+        is_new_contributor = len(prev_contribs) == 0
 
+        # Mise à jour du pays
+        update_data = {
+            'total_invested': firestore.Increment(amount),
+            'last_update': datetime.utcnow()
+        }
+        if is_new_contributor:
+            update_data['contributor_count'] = firestore.Increment(1)
+
+        country_ref.set(update_data, merge=True)
+
+        # Log la nouvelle contribution
         country_ref.collection('contributions').add({
             'uid': uid,
             'username': username,
             'amount': amount,
-            'timestamp': datetime.utcnow()
+            'timestamp': datetime.utcnow(),
+            'country_iso': iso_code
         })
         
     return redirect(url_for('index'))
