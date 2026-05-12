@@ -7,7 +7,7 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'conquest_2026_secure_key')
+app.secret_key = os.environ.get('SECRET_KEY', 'glory_to_nations_2026')
 
 # --- CONFIG STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
@@ -40,39 +40,30 @@ def create_checkout_session():
     try:
         data = request.json
         iso_code = data.get('code')
-        proposed_price = round(float(data.get('price', 0)), 2)
+        amount = round(float(data.get('price', 0)), 2)
         user_id = data.get('user_id')
-        username = data.get('username') # Le pseudo choisi par l'user
+        username = data.get('username')
 
-        if not user_id:
-            return jsonify(error="Auth required"), 401
+        if amount < 1.00:
+            return jsonify(error="Minimum contribution is $1.00"), 400
 
         base_url = request.host_url.rstrip('/')
         
-        # Vérification prix
-        doc = db.collection('territories').document(iso_code).get()
-        min_allowed = 1.00
-        if doc.exists:
-            min_allowed = max(1.00, round(doc.to_dict().get('price', 0) * 1.2, 2))
-
-        if proposed_price < min_allowed:
-            return jsonify(error=f"Price too low"), 400
-
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
-                        'name': f"TERRITORY: {iso_code}",
-                        'description': f"New Commander: {username}",
+                        'name': f"CONTRIBUTION: {iso_code}",
+                        'description': f"Support from Commander {username}",
                     },
-                    'unit_amount': int(proposed_price * 100),
+                    'unit_amount': int(amount * 100),
                 },
                 'quantity': 1,
             }],
             mode='payment',
-            success_url=f"{base_url}/success?code={iso_code}&price={proposed_price}&uid={user_id}&user={username}",
+            success_url=f"{base_url}/success?code={iso_code}&price={amount}&uid={user_id}&user={username}",
             cancel_url=f"{base_url}/",
         )
         return jsonify({'id': checkout_session.id})
@@ -82,17 +73,35 @@ def create_checkout_session():
 @app.route('/success')
 def success():
     iso_code = request.args.get('code')
-    price = request.args.get('price')
+    amount = float(request.args.get('price'))
     uid = request.args.get('uid')
     username = request.args.get('user')
 
-    if iso_code and price and uid:
-        db.collection('territories').document(iso_code).set({
-            'price': float(price),
-            'owner_id': uid,
-            'owner_name': username,
-            'last_update': datetime.utcnow()
+    if iso_code and amount and uid:
+        country_ref = db.collection('territories').document(iso_code)
+        doc = country_ref.get()
+        
+        if doc.exists:
+            country_ref.update({
+                'total_invested': firestore.Increment(amount),
+                'contributor_count': firestore.Increment(1),
+                'last_update': datetime.utcnow()
+            })
+        else:
+            country_ref.set({
+                'total_invested': amount,
+                'contributor_count': 1,
+                'last_update': datetime.utcnow()
+            })
+
+        # Log de la contribution individuelle
+        country_ref.collection('contributions').add({
+            'uid': uid,
+            'username': username,
+            'amount': amount,
+            'timestamp': datetime.utcnow()
         })
+        
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
