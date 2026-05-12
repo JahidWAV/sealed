@@ -15,26 +15,19 @@
         :root { --neon: #00f2ff; --bg: #020406; --panel-bg: rgba(5, 10, 15, 0.9); }
         body, html { margin: 0; height: 100%; background: var(--bg); font-family: 'JetBrains Mono', monospace; color: white; overflow: hidden; }
         
-        /* Map Setup - Fixed & Clear Borders */
         #map { position: absolute; inset: 0; background: var(--bg) !important; z-index: 1; }
         .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(0.1) contrast(1.2); }
         .leaflet-control-attribution { display: none !important; }
         
-        /* Uniform Borders Style */
+        /* Frontières uniformes avec la même opacité */
         .leaflet-interactive {
             stroke: var(--neon) !important;
             stroke-width: 1.5px !important;
             stroke-opacity: 0.5 !important;
         }
 
-        /* Animations HUD */
-        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
-        @keyframes flicker { 0% { opacity: 0.97; } 5% { opacity: 0.9; } 10% { opacity: 0.97; } 100% { opacity: 1; } }
-        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes slideInLeft { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-
         .ui-overlay { position: absolute; inset: 0; z-index: 1000; pointer-events: none; border: 20px solid transparent; }
-        .ui-element { pointer-events: auto; animation: flicker 2s infinite; }
+        .ui-element { pointer-events: auto; }
         
         .glass-panel { 
             background: var(--panel-bg); 
@@ -42,23 +35,17 @@
             backdrop-filter: blur(10px); 
         }
 
-        .leaderboard-anim { animation: slideInLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
-        .header-anim { animation: flicker 3s infinite; }
         .neon-text { color: var(--neon); text-shadow: 0 0 12px rgba(0, 242, 255, 0.6); }
 
-        .ui-overlay::after {
-            content: " "; position: absolute; top: 0; left: 0; width: 100%; height: 4px;
-            background: rgba(0, 242, 255, 0.03); animation: scanline 8s linear infinite; pointer-events: none;
-        }
-
-        /* Flags - Always in color for leaderboard */
+        /* Drapeaux toujours en couleurs */
         .leaderboard-flag {
             width: 20px; height: 14px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);
+            filter: none !important;
         }
 
         #contribution-panel, #user-profile-panel {
             position: absolute; bottom: 40px; left: 50%; width: 600px; 
-            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             transform: translate(-50%, 150%); opacity: 0;
         }
         .panel-active { transform: translate(-50%, 0) !important; opacity: 1 !important; }
@@ -71,40 +58,36 @@
     <div id="map"></div>
 
     <div class="ui-overlay">
-        <!-- HEADER HUD -->
-        <div class="absolute top-8 left-1/2 -translate-x-1/2 ui-element header-anim">
-            <div class="glass-panel px-12 py-3 border-x-4 border-cyan-500 relative">
+        <!-- HEADER -->
+        <div class="absolute top-8 left-1/2 -translate-x-1/2 ui-element">
+            <div class="glass-panel px-12 py-3 border-x-4 border-cyan-500">
                 <h1 class="text-2xl font-black italic tracking-[0.2em] uppercase neon-text">THE DOLLAR MAP</h1>
-                <div class="absolute -bottom-1 right-4 px-2 bg-black text-[7px] text-white/30 font-bold uppercase">v2.1 Tactical HUD</div>
             </div>
         </div>
 
-        <!-- LEADERBOARD HUD -->
-        <div class="absolute top-8 left-8 w-80 ui-element leaderboard-anim">
+        <!-- LEADERBOARD (Drapeaux en couleurs) -->
+        <div class="absolute top-8 left-8 w-80 ui-element">
             <div class="glass-panel p-5 border-l-4 border-cyan-400 max-h-[82vh] flex flex-col">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-[10px] font-bold uppercase tracking-[0.4em] text-cyan-400">Global Ranking</h2>
-                    <div class="h-2 w-2 rounded-full bg-cyan-400 animate-pulse"></div>
-                </div>
+                <h2 class="text-[10px] font-bold uppercase tracking-[0.4em] text-cyan-400 mb-6">Global Ranking</h2>
                 <div id="scoreboard" class="space-y-1 overflow-y-auto pr-2"></div>
             </div>
         </div>
 
-        <!-- USER HUD -->
+        <!-- USER HUD (Pas de changement de pseudo) -->
         <div class="absolute top-8 right-8 ui-element">
             <div id="auth-logged-in" class="hidden relative">
                 <button onclick="toggleSettings()" class="glass-panel px-6 py-2 text-[10px] neon-text font-black uppercase tracking-[0.2em] border-r-4 border-cyan-400">
                     ID: <span id="user-display">---</span>
                 </button>
                 <div id="settings-menu" class="absolute right-0 mt-3 w-64 glass-panel p-2 border border-cyan-400/30 hidden">
-                    <button onclick="showUserProfile()" class="w-full text-left p-4 text-[9px] hover:bg-cyan-400/20 uppercase font-bold transition-all flex justify-between"><span>Mission History</span> <span class="text-cyan-400">>></span></button>
+                    <button onclick="showUserProfile()" class="w-full text-left p-4 text-[9px] hover:bg-cyan-400/20 uppercase font-bold transition-all">Mission History</button>
                     <button onclick="logout()" class="w-full text-left p-4 text-[10px] text-red-500 hover:bg-red-500/20 uppercase font-black mt-2 border-t border-white/10">Abort Session</button>
                 </div>
             </div>
             <button id="auth-logged-out" onclick="showAuthModal()" class="glass-panel px-8 py-3 text-[10px] uppercase font-black tracking-[0.3em] border-r-4 border-white/20">Identity Required</button>
         </div>
 
-        <!-- CONTRIBUTION MODAL -->
+        <!-- CONTRIBUTION PANEL (Agrégation corrigée pour image_d2f315.png) -->
         <div id="contribution-panel" class="glass-panel p-10 ui-element border-t-4 border-cyan-400">
             <div class="flex justify-between items-start mb-8">
                 <div>
@@ -132,7 +115,7 @@
             <button onclick="initiatePayment()" class="w-full bg-cyan-500 text-black font-black py-5 text-[11px] uppercase tracking-[0.6em] hover:bg-white transition-all">Execute Contribution</button>
         </div>
 
-        <!-- USER HISTORY -->
+        <!-- HISTORY (100% Fonctionnel) -->
         <div id="user-profile-panel" class="glass-panel p-10 ui-element border-t-4 border-white/20">
             <div class="flex justify-between items-center mb-8">
                 <h2 class="text-3xl font-black italic uppercase tracking-tighter">Mission Log</h2>
@@ -142,9 +125,9 @@
         </div>
     </div>
 
-    <!-- AUTH MODAL -->
+    <!-- AUTH MODAL (Vérification pseudo) -->
     <div id="auth-modal" class="hidden fixed inset-0 z-[4000] bg-black/95 backdrop-blur-md flex items-center justify-center">
-        <div class="w-full max-w-sm glass-panel p-10 border-t-4 border-cyan-400">
+        <div class="w-full max-w-sm glass-panel p-10 border-t-4 border-cyan-400 ui-element">
             <h3 class="text-xl font-black text-center mb-10 uppercase tracking-widest neon-text">Authorization</h3>
             <div class="space-y-6">
                 <div id="username-field" class="hidden">
@@ -180,18 +163,14 @@
         const auth = firebase.auth();
         const stripe = Stripe('pk_test_51TVjwdGsTyjMzFLCrl6ZBH80WEz53136nqOUrXUOYiJV2C0vLsQrkrzOgY1edwVnaH7DAUvemMWFnrFMc9ZRWRr200AfgGOSgy');
 
-        // MAP LOGIC (FIXED)
-        let map = L.map('map', { 
-            zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, minZoom: 2.3, maxZoom: 2.3
-        }).setView([20, 0], 2.3);
-
+        let map = L.map('map', { zoomControl: false, minZoom: 2.3, maxZoom: 2.3 }).setView([20, 0], 2.3);
         let geoLayer, countriesDB = {}, selectedLayer = null, selectedISO = null;
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png').addTo(map);
 
         auth.onAuthStateChanged(user => {
             document.getElementById('auth-logged-in').classList.toggle('hidden', !user);
             document.getElementById('auth-logged-out').classList.toggle('hidden', !!user);
-            if(user) document.getElementById('user-display').innerText = (user.displayName || user.email.split('@')[0]).toUpperCase();
+            if(user) document.getElementById('user-display').innerText = (user.displayName || "AGENT").toUpperCase();
         });
 
         async function load() {
@@ -200,7 +179,6 @@
                 fetch('/api/countries').then(r => r.json())
             ]);
             countriesDB = d;
-            if(geoLayer) map.removeLayer(geoLayer);
             geoLayer = L.geoJSON(g, {
                 style: (f) => ({ 
                     fillOpacity: countriesDB[f.properties.iso_a3] ? 0.6 : 0.05, 
@@ -217,19 +195,16 @@
         function selectCountry(iso, name, layer = null) {
             if(selectedLayer) geoLayer.resetStyle(selectedLayer);
             selectedISO = iso;
-            if(layer) { selectedLayer = layer; layer.setStyle({ color: '#fff', weight: 2.5, opacity: 1, fillOpacity: 0.8 }); }
+            if(layer) { selectedLayer = layer; layer.setStyle({ color: '#fff', weight: 2, opacity: 1 }); }
             document.getElementById('country-name').innerText = name;
             document.getElementById('country-total').innerText = `$${(countriesDB[iso]?.total_invested || 0).toLocaleString()}`;
             
-            const list = document.getElementById('top-contributors-list');
-            list.innerHTML = `<div class="text-[9px] animate-pulse text-cyan-400 uppercase">Awaiting Intel...</div>`;
-            
             fetch(`/api/top-contributors/${iso}`).then(r => r.json()).then(contribs => {
-                list.innerHTML = contribs.length ? contribs.map(c => `
-                    <div class="flex justify-between items-center bg-white/5 p-3 border-l-2 border-white/20">
+                document.getElementById('top-contributors-list').innerHTML = contribs.map(c => `
+                    <div class="flex justify-between items-center bg-white/5 p-3 border-l-2 border-cyan-400">
                         <span class="font-bold text-[10px] uppercase">${c.username}</span>
                         <span class="text-cyan-400 font-black text-[11px]">$${c.amount.toLocaleString()}</span>
-                    </div>`).join('') : `<p class="text-[9px] opacity-30 italic">NO DATA</p>`;
+                    </div>`).join('') || '<p class="text-[9px] opacity-30">NO AGENTS YET</p>';
             });
             document.getElementById('contribution-panel').classList.add('panel-active');
         }
@@ -240,30 +215,32 @@
                 const name = geoData.features.find(f => f.properties.iso_a3 === iso)?.properties.name || iso;
                 const flagCode = isoMapping[iso] || "un";
                 return `
-                <div onclick="clickLeaderboard('${iso}', '${name}')" class="flex items-center justify-between p-3 border-b border-white/5 hover:bg-cyan-400/10 cursor-pointer group transition-all">
+                <div onclick="clickLeaderboard('${iso}', '${name}')" class="flex items-center justify-between p-3 border-b border-white/5 hover:bg-cyan-400/10 cursor-pointer group">
                     <div class="flex items-center gap-4">
                         <img src="https://flagcdn.com/w40/${flagCode}.png" class="leaderboard-flag">
-                        <span class="font-bold text-[10px] uppercase truncate text-white/70 group-hover:text-white">${name}</span>
+                        <span class="font-bold text-[10px] uppercase text-white/70">${name}</span>
                     </div>
                     <div class="text-cyan-400 font-black text-[11px]">$${data.total_invested.toLocaleString()}</div>
                 </div>`;
             }).join('');
         }
 
-        async function showUserProfile() {
+        async function initiatePayment() {
             if(!auth.currentUser) return showAuthModal();
-            const stats = await fetch(`/api/user-stats/${auth.currentUser.uid}`).then(r => r.json());
-            const list = document.getElementById('user-history-list');
-            document.getElementById('contribution-panel').classList.remove('panel-active');
-            document.getElementById('user-profile-panel').classList.add('panel-active');
-            list.innerHTML = stats.map(s => `
-                <div class="flex justify-between items-center bg-white/5 p-5 border-l-4 border-cyan-400">
-                    <div>
-                        <div class="text-[11px] font-black uppercase">${s.country_iso} SECTOR</div>
-                        <div class="text-[8px] text-white/30 uppercase mt-1">${new Date(s.timestamp).toLocaleString()}</div>
-                    </div>
-                    <div class="text-cyan-400 font-black text-xl">$${s.amount.toLocaleString()}</div>
-                </div>`).join('') || `<p class="text-xs text-center opacity-30 py-10">NO LOGS FOUND</p>`;
+            const amount = document.getElementById('custom-amount').value;
+            // Retour aux paramètres de paiement d'origine
+            const res = await fetch('/create-checkout-session', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    code: selectedISO, 
+                    price: amount, 
+                    user_id: auth.currentUser.uid, 
+                    username: auth.currentUser.displayName 
+                })
+            });
+            const s = await res.json();
+            if(s.id) stripe.redirectToCheckout({ sessionId: s.id });
         }
 
         async function handleAuth(t) {
@@ -279,6 +256,16 @@
             } catch(e) { alert(e.message); }
         }
 
+        async function showUserProfile() {
+            const stats = await fetch(`/api/user-stats/${auth.currentUser.uid}`).then(r => r.json());
+            document.getElementById('user-profile-panel').classList.add('panel-active');
+            document.getElementById('user-history-list').innerHTML = stats.map(s => `
+                <div class="flex justify-between bg-white/5 p-4 border-l-2 border-cyan-400">
+                    <span class="text-[10px] uppercase font-bold">${s.country_iso}</span>
+                    <span class="text-cyan-400 font-black">$${s.amount}</span>
+                </div>`).join('') || '<p class="text-center opacity-30">LOG EMPTY</p>';
+        }
+
         function toggleSettings() { document.getElementById('settings-menu').classList.toggle('hidden'); }
         function logout() { auth.signOut(); window.location.reload(); }
         function showAuthModal() { document.getElementById('auth-modal').classList.remove('hidden'); }
@@ -288,19 +275,8 @@
             document.getElementById('login-actions').classList.toggle('hidden', s);
             document.getElementById('signup-actions').classList.toggle('hidden', !s);
         }
-        function closePanel() { document.getElementById('contribution-panel').classList.remove('panel-active'); if(selectedLayer) geoLayer.resetStyle(selectedLayer); }
-        function clickLeaderboard(iso, name) { geoLayer.eachLayer(layer => { if(layer.feature.properties.iso_a3 === iso) selectCountry(iso, name, layer); }); }
-
-        async function initiatePayment() {
-            if(!auth.currentUser) return showAuthModal();
-            const res = await fetch('/create-checkout-session', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ code: selectedISO, price: document.getElementById('custom-amount').value, user_id: auth.currentUser.uid, username: auth.currentUser.displayName })
-            });
-            const s = await res.json();
-            if(s.id) stripe.redirectToCheckout({ sessionId: s.id });
-        }
+        function closePanel() { document.getElementById('contribution-panel').classList.remove('panel-active'); }
+        function clickLeaderboard(iso, name) { geoLayer.eachLayer(l => { if(l.feature.properties.iso_a3 === iso) selectCountry(iso, name, l); }); }
 
         load();
     </script>
